@@ -1,1 +1,1 @@
-opengradient>=0.9.3
+opengradient==1.0.0
