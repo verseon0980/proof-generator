@@ -5,37 +5,13 @@ import asyncio
 import datetime
 import re
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler
 
-from eth_account import Account
-from x402.client import x402Client
-from x402.mechanisms.evm import EthAccountSigner
-from opengradient.client.llm import (
-    register_exact_evm_client,
-    register_upto_evm_client,
-    DEFAULT_RPC_URL,
-    DEFAULT_TEE_REGISTRY_ADDRESS,
-    RegistryTEEConnection,
-    TEERegistry,
-)
 import opengradient as og
 from opengradient import TEE_LLM
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
-
-
-def make_llm(private_key: str) -> og.LLM:
-    account = Account.from_key(private_key)
-    signer = EthAccountSigner(account)
-    x402_client = x402Client()
-    # No networks= means eip155:* wildcard — fixes "No payment requirements match"
-    register_exact_evm_client(x402_client, signer)
-    register_upto_evm_client(x402_client, signer)
-    registry = TEERegistry(rpc_url=DEFAULT_RPC_URL, registry_address=DEFAULT_TEE_REGISTRY_ADDRESS)
-    llm = og.LLM.__new__(og.LLM)
-    llm._wallet_account = account
-    llm._tee = RegistryTEEConnection(x402_client=x402_client, registry=registry)
-    return llm
 
 
 def generate_cert_id():
@@ -67,24 +43,24 @@ def parse_ai_response(raw: str) -> dict:
 async def _infer(idea: str, author: str, llm) -> dict:
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
 
-A user has submitted the following idea:
+A user submitted this idea:
 \"\"\"{idea}\"\"\"
 
 Return ONLY valid JSON, no markdown, no extra text:
 {{
-  "title": "<short 5-8 word title for this idea>",
+  "title": "<short 5-8 word title>",
   "scores": {{
-    "overall": <integer 0-100>,
-    "novelty": <integer 0-100>,
-    "market_gap": <integer 0-100>,
-    "technical": <integer 0-100>,
-    "prior_art_risk": <integer 0-100, where low means low risk>
+    "overall": <0-100>,
+    "novelty": <0-100>,
+    "market_gap": <0-100>,
+    "technical": <0-100>,
+    "prior_art_risk": <0-100>
   }},
-  "analysis": "<2-3 sentence analysis of uniqueness>",
+  "analysis": "<2-3 sentence analysis>",
   "similar": [
     {{
-      "name": "<similar product or patent name>",
-      "difference": "<one sentence how this idea differs>",
+      "name": "<similar product>",
+      "difference": "<one sentence difference>",
       "risk": "low"
     }}
   ]
@@ -96,7 +72,6 @@ Return ONLY valid JSON, no markdown, no extra text:
         max_tokens=600,
         temperature=0.2
     )
-
     parsed = parse_ai_response(result.completion_output or "")
     return {
         "cert_id": generate_cert_id(),
@@ -120,11 +95,12 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            llm = make_llm(PRIVATE_KEY)
+            llm = og.LLM(private_key=PRIVATE_KEY)
             llm.ensure_opg_approval(0.1)
             out['data'] = loop.run_until_complete(_infer(idea, author, llm))
         except Exception as e:
-            err['e'] = e
+            err['msg'] = traceback.format_exc()
+            err['e'] = str(e)
         finally:
             loop.close()
 
@@ -133,7 +109,7 @@ def run_inference(idea: str, author: str) -> dict:
     t.join()
 
     if 'e' in err:
-        raise err['e']
+        raise RuntimeError(err['e'])
     return out['data']
 
 
@@ -144,9 +120,16 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        # Always send JSON — never let Python send its own error page
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
+            raw = self.rfile.read(length)
+            try:
+                body = json.loads(raw)
+            except Exception:
+                self._error(400, "Invalid JSON body.")
+                return
+
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
@@ -160,10 +143,15 @@ class handler(BaseHTTPRequestHandler):
                 self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            self._json(200, run_inference(idea, author))
+            try:
+                result = run_inference(idea, author)
+                self._json(200, result)
+            except Exception as e:
+                self._error(500, str(e))
 
         except Exception as e:
-            self._error(500, str(e))
+            # Last resort — still send JSON
+            self._error(500, f"Unexpected error: {str(e)}")
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -171,7 +159,10 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, code, data):
-        payload = json.dumps(data).encode()
+        try:
+            payload = json.dumps(data).encode()
+        except Exception:
+            payload = b'{"error": "Failed to serialize response"}'
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(payload))
