@@ -44,15 +44,11 @@ def parse_ai_response(raw: str) -> dict:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    try:
-        client = og.Client(private_key=PRIVATE_KEY)
+    client = og.Client(private_key=PRIVATE_KEY)
 
-        # 🔴 CRITICAL DEBUG (you MUST check this in logs)
-        print("BASE URL:", getattr(client.llm, "base_url", "NO BASE URL"))
-
-        messages = [{
-            "role": "user",
-            "content": f"""You are an AI that evaluates the originality of ideas.
+    result = client.llm.completion(
+        model=og.TEE_LLM.GPT_4O_MINI,
+        prompt=f"""You are an AI that evaluates the originality of ideas.
 
 Idea: \"\"\"{idea}\"\"\"
 
@@ -68,41 +64,27 @@ Return ONLY valid JSON:
   }},
   "analysis": "<2-3 sentence analysis>",
   "similar": []
-}}"""
-        }]
+}}""",
+        max_tokens=600,
+        temperature=0.2
+    )
 
-        result = client.llm.chat(
-            model=og.TEE_LLM.GPT_4_1_2025_04_14,
-            messages=messages,
-            max_tokens=600,
-            temperature=0.2
-        )
+    raw = result.output if hasattr(result, "output") else ""
 
-        raw = ""
-        if result.chat_output:
-            raw = result.chat_output.get("content", "")
+    parsed = parse_ai_response(raw)
 
-        parsed = parse_ai_response(raw)
-
-        return {
-            "cert_id": generate_cert_id(),
-            "author": author,
-            "idea": idea,
-            "idea_hash": hash_idea(idea),
-            "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-            "payment_hash": getattr(result, "payment_hash", None),
-            "title": parsed.get("title"),
-            "scores": parsed.get("scores"),
-            "analysis": parsed.get("analysis"),
-            "similar": parsed.get("similar")
-        }
-
-    except Exception as e:
-        print("FULL ERROR:\n", traceback.format_exc())
-        raise
-
-
-# ✅ REQUIRED FOR VERCEL
+    return {
+        "cert_id": generate_cert_id(),
+        "author": author,
+        "idea": idea,
+        "idea_hash": hash_idea(idea),
+        "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
+        "payment_hash": getattr(result, "payment_hash", None),
+        "title": parsed.get("title"),
+        "scores": parsed.get("scores"),
+        "analysis": parsed.get("analysis"),
+        "similar": parsed.get("similar")
+    }
 class handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
