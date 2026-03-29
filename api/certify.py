@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler
 
 from eth_account import Account
 from x402.client import x402Client
-from x402.accounts.eth import EthAccountSigner
+from x402.mechanisms.evm import EthAccountSigner
 from opengradient.client.llm import (
     register_exact_evm_client,
     register_upto_evm_client,
@@ -25,20 +25,13 @@ PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
 
 def make_llm(private_key: str) -> og.LLM:
-    """
-    Same as og.LLM(private_key=...) but registers eip155:* wildcard
-    instead of only eip155:84532, so any TEE network is accepted.
-    """
     account = Account.from_key(private_key)
     signer = EthAccountSigner(account)
     x402_client = x402Client()
-    # No networks= arg → registers eip155:* wildcard
+    # No networks= means eip155:* wildcard — fixes "No payment requirements match"
     register_exact_evm_client(x402_client, signer)
     register_upto_evm_client(x402_client, signer)
-    registry = TEERegistry(
-        rpc_url=DEFAULT_RPC_URL,
-        registry_address=DEFAULT_TEE_REGISTRY_ADDRESS
-    )
+    registry = TEERegistry(rpc_url=DEFAULT_RPC_URL, registry_address=DEFAULT_TEE_REGISTRY_ADDRESS)
     llm = og.LLM.__new__(og.LLM)
     llm._wallet_account = account
     llm._tee = RegistryTEEConnection(x402_client=x402_client, registry=registry)
