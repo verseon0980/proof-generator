@@ -97,7 +97,6 @@ def run_inference(idea: str, author: str) -> dict:
         try:
             llm = og.LLM(private_key=PRIVATE_KEY)
             llm.ensure_opg_approval(0.1)
-            llm.register_payment_scheme("x402")
             out['data'] = loop.run_until_complete(_infer(idea, author, llm))
         except Exception as e:
             err['msg'] = traceback.format_exc()
