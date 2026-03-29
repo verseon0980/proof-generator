@@ -4,9 +4,11 @@ import hashlib
 import asyncio
 import datetime
 import re
+import threading
 from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
+from opengradient import TEE_LLM
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
@@ -21,64 +23,12 @@ def hash_idea(idea: str) -> str:
     return "0x" + hashlib.sha256(idea.encode()).hexdigest()
 
 
-def extract_text_from_result(result) -> str:
-    """
-    Safely extract the text string from an OpenGradient completion result.
-    Handles: plain string, object with .completion_output (str or list),
-    object with .content (list of blocks), or dict.
-    """
-    # 1. Already a plain string
-    if isinstance(result, str):
-        return result
-
-    # 2. Dict-like
-    if isinstance(result, dict):
-        for key in ("completion_output", "content", "text", "output"):
-            val = result.get(key)
-            if val:
-                return extract_text_from_result(val)
-        return json.dumps(result)
-
-    # 3. List — could be a list of content blocks or a list of strings
-    if isinstance(result, list):
-        parts = []
-        for item in result:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                # Anthropic-style block: {"type": "text", "text": "..."}
-                text = item.get("text") or item.get("content") or ""
-                if text:
-                    parts.append(text)
-            elif hasattr(item, "text"):
-                parts.append(str(item.text))
-        return " ".join(parts)
-
-    # 4. Object with .completion_output attribute
-    if hasattr(result, "completion_output"):
-        return extract_text_from_result(result.completion_output)
-
-    # 5. Object with .content attribute
-    if hasattr(result, "content"):
-        return extract_text_from_result(result.content)
-
-    # 6. Object with .text attribute
-    if hasattr(result, "text"):
-        return str(result.text)
-
-    # 7. Fallback: stringify whatever we got
-    return str(result)
-
-
 def parse_ai_response(raw: str) -> dict:
     """Parse JSON from AI response, stripping markdown fences if present."""
-    clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-
-    # Try to find a JSON object even if there's surrounding text
+    clean = re.sub(r"```(?:json)?", "", raw or "").strip().rstrip("`").strip()
     match = re.search(r'\{.*\}', clean, re.DOTALL)
     if match:
         clean = match.group(0)
-
     try:
         return json.loads(clean)
     except Exception:
@@ -91,16 +41,12 @@ def parse_ai_response(raw: str) -> dict:
                 "technical": 70,
                 "prior_art_risk": 30
             },
-            "analysis": raw[:500] if raw else "Analysis unavailable.",
+            "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
 
 
-def run_inference_sync(idea: str, author: str) -> dict:
-    """
-    Synchronous wrapper around OpenGradient inference.
-    Handles both sync and async SDK variants gracefully.
-    """
+async def _run_inference_async(idea: str, author: str) -> dict:
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
 
 A user has submitted the following idea:
@@ -134,41 +80,23 @@ Return ONLY valid JSON, no markdown, no extra text:
 
     llm = og.LLM(private_key=PRIVATE_KEY)
 
-    # Some SDK versions require approval; wrap in try/except so it doesn't crash
     try:
         llm.ensure_opg_approval(0.1)
     except Exception:
         pass
 
-    payment_hash = None
+    # MUST pass a TEE_LLM enum value, NOT a plain string like 'gpt-4o-mini'.
+    # The SDK does model.split("/")[1] internally — a string without "/" causes
+    # the "list index out of range" error.
+    result = await llm.completion(
+        model=TEE_LLM.GPT_4_1_2025_04_14,
+        prompt=prompt,
+        max_tokens=300,
+        temperature=0.2
+    )
 
-    # Try async completion first, then fall back to sync
-    try:
-        result = asyncio.run(
-            llm.completion(
-                model='gpt-4o-mini',
-                prompt=prompt,
-                max_tokens=600,
-                temperature=0.2
-            )
-        )
-    except (RuntimeError, AttributeError):
-        # asyncio.run fails if there's already a running loop,
-        # or if the method is synchronous
-        result = llm.completion(
-            model='gpt-4o-mini',
-            prompt=prompt,
-            max_tokens=600,
-            temperature=0.2
-        )
-
-    # Safely pull the payment hash if the SDK provides it
-    if hasattr(result, 'payment_hash'):
-        payment_hash = result.payment_hash
-    elif isinstance(result, dict):
-        payment_hash = result.get('payment_hash')
-
-    raw_text = extract_text_from_result(result)
+    raw_text = result.completion_output or ""
+    payment_hash = result.payment_hash
     parsed = parse_ai_response(raw_text)
 
     return {
@@ -189,6 +117,37 @@ Return ONLY valid JSON, no markdown, no extra text:
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
+
+
+def run_inference(idea: str, author: str) -> dict:
+    """
+    Run async inference safely from a sync context.
+    Uses a dedicated thread with its own event loop to avoid
+    'cannot run nested event loop' errors in WSGI/threaded servers.
+    """
+    result_container = {}
+    error_container = {}
+
+    def thread_target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result_container['data'] = loop.run_until_complete(
+                _run_inference_async(idea, author)
+            )
+        except Exception as e:
+            error_container['error'] = e
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=thread_target)
+    t.start()
+    t.join()
+
+    if 'error' in error_container:
+        raise error_container['error']
+
+    return result_container['data']
 
 
 class handler(BaseHTTPRequestHandler):
@@ -214,13 +173,13 @@ class handler(BaseHTTPRequestHandler):
                 self._error(500, "Server configuration error: missing OG_PRIVATE_KEY.")
                 return
 
-            result = run_inference_sync(idea, author)
+            result = run_inference(idea, author)
             self._json(200, result)
 
         except json.JSONDecodeError:
             self._error(400, "Invalid JSON in request body.")
         except Exception as e:
-            self._error(500, f"Internal error: {str(e)}")
+            self._error(500, str(e))
 
     def _set_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
