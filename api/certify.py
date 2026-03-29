@@ -37,7 +37,10 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def run_inference(idea: str, author: str) -> dict:
-    llm = og.LLM(private_key=PRIVATE_KEY)
+    llm = og.LLM(
+    private_key=PRIVATE_KEY,
+    network="base-sepolia"
+)
     llm.ensure_opg_approval(0.1)
 
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
