@@ -7,8 +7,13 @@ import re
 import threading
 from http.server import BaseHTTPRequestHandler
 
+from eth_account import Account
+from x402.client import x402Client, register_exact_evm_client, register_upto_evm_client
+from x402.accounts.eth import EthAccountSigner
 import opengradient as og
 from opengradient import TEE_LLM
+from opengradient.client.llm import LLM, RegistryTEEConnection, TEERegistry
+from opengradient.client.llm import DEFAULT_RPC_URL, DEFAULT_TEE_REGISTRY_ADDRESS
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
@@ -33,16 +38,33 @@ def parse_ai_response(raw: str) -> dict:
     except Exception:
         return {
             "title": "Idea certificate",
-            "scores": {
-                "overall": 70,
-                "novelty": 70,
-                "market_gap": 70,
-                "technical": 70,
-                "prior_art_risk": 30
-            },
+            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
             "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
+
+
+def build_llm_wildcard(private_key: str) -> og.LLM:
+    """
+    Build an LLM client that registers eip155:* wildcard instead of only eip155:84532.
+    The default SDK passes networks=[BASE_TESTNET_NETWORK] which locks to one chain ID.
+    If the TEE server returns a payment requirement for any other network/scheme variant,
+    x402 throws 'No payment requirements match registered schemes'.
+    Using the wildcard fixes this.
+    """
+    account = Account.from_key(private_key)
+    signer = EthAccountSigner(account)
+
+    # Register wildcard — no networks arg = eip155:* matches any EVM chain
+    x402_client = x402Client()
+    register_exact_evm_client(x402_client, signer)
+    register_upto_evm_client(x402_client, signer)
+
+    registry = TEERegistry(rpc_url=DEFAULT_RPC_URL, registry_address=DEFAULT_TEE_REGISTRY_ADDRESS)
+    llm = og.LLM.__new__(og.LLM)
+    llm._wallet_account = account
+    llm._tee = RegistryTEEConnection(x402_client=x402_client, registry=registry)
+    return llm
 
 
 async def _run_inference_async(idea: str, author: str, llm: og.LLM) -> dict:
@@ -77,7 +99,6 @@ Return ONLY valid JSON, no markdown, no extra text:
   ]
 }}"""
 
-    # MUST use TEE_LLM enum — plain strings cause "list index out of range"
     result = await llm.completion(
         model=TEE_LLM.GPT_4_1_2025_04_14,
         prompt=prompt,
@@ -86,7 +107,6 @@ Return ONLY valid JSON, no markdown, no extra text:
     )
 
     raw_text = result.completion_output or ""
-    payment_hash = result.payment_hash
     parsed = parse_ai_response(raw_text)
 
     return {
@@ -95,15 +115,9 @@ Return ONLY valid JSON, no markdown, no extra text:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": payment_hash,
+        "payment_hash": result.payment_hash,
         "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {
-            "overall": 70,
-            "novelty": 70,
-            "market_gap": 70,
-            "technical": 70,
-            "prior_art_risk": 30
-        }),
+        "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
@@ -117,12 +131,8 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            # Create LLM and run Permit2 approval synchronously FIRST
-            # This must happen in sync context before any async calls
-            llm = og.LLM(private_key=PRIVATE_KEY)
-            llm.ensure_opg_approval(min_allowance=1.0, approve_amount=10.0)
-
-            # Now run the async inference with the approved llm
+            llm = build_llm_wildcard(PRIVATE_KEY)
+            llm.ensure_opg_approval(0.1)
             result_container['data'] = loop.run_until_complete(
                 _run_inference_async(idea, author, llm)
             )
