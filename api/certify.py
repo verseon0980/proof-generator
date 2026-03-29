@@ -38,9 +38,22 @@ def parse_ai_response(raw: str) -> dict:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    # og.Client uses a hardcoded TEE server URL — no registry lookup, no payment scheme mismatch
+    from eth_account import Account
+    from x402v2 import x402Client as x402Clientv2
+    from x402v2.mechanisms.evm import EthAccountSigner as EthAccountSignerv2
+    from x402v2.mechanisms.evm.exact.register import register_exact_evm_client as reg_exact
+    from x402v2.mechanisms.evm.upto.register import register_upto_evm_client as reg_upto
+
     client = og.Client(private_key=PRIVATE_KEY)
     client.llm.ensure_opg_approval(opg_amount=1.0)
+
+    # Patch x402 client to use wildcard eip155:* instead of locked eip155:84532
+    account = Account.from_key(PRIVATE_KEY)
+    signer = EthAccountSignerv2(account)
+    new_x402 = x402Clientv2()
+    reg_exact(new_x402, signer)   # no networks= → wildcard
+    reg_upto(new_x402, signer)    # no networks= → wildcard
+    client.llm._x402_client = new_x402
 
     messages = [
         {
@@ -49,7 +62,7 @@ def run_inference(idea: str, author: str) -> dict:
 
 Idea: \"\"\"{idea}\"\"\"
 
-Return ONLY valid JSON, no markdown, no extra text:
+Return ONLY valid JSON, no markdown:
 {{
   "title": "<short 5-8 word title>",
   "scores": {{
@@ -96,7 +109,6 @@ Return ONLY valid JSON, no markdown, no extra text:
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
-
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
