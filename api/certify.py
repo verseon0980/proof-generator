@@ -92,7 +92,12 @@ Return ONLY valid JSON, no markdown, no extra text:
         temperature=0.2
     )
 
-    parsed = parse_ai_response(result.completion_output)
+    raw_output = getattr(result, "completion_output", "")
+
+if not raw_output:
+    raise Exception("Empty response from LLM")
+
+parsed = parse_ai_response(raw_output)
     payment_hash = getattr(result, 'payment_hash', None)
 
     return {
