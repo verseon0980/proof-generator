@@ -31,7 +31,13 @@ def parse_ai_response(raw: str) -> dict:
     except Exception:
         return {
             "title": "Idea certificate",
-            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "scores": {
+                "overall": 70,
+                "novelty": 70,
+                "market_gap": 70,
+                "technical": 70,
+                "prior_art_risk": 30
+            },
             "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
@@ -39,6 +45,8 @@ def parse_ai_response(raw: str) -> dict:
 
 def run_inference(idea: str, author: str) -> dict:
     client = og.Client(private_key=PRIVATE_KEY)
+
+    # approval (keep this)
     client.llm.ensure_opg_approval(opg_amount=1.0)
 
     messages = [{
@@ -62,18 +70,23 @@ Return ONLY valid JSON:
 }}"""
     }]
 
+    # 🔴 DEBUG + LLM CALL (CORRECT PLACE)
     try:
-    result = client.llm.chat(
-        model=og.TEE_LLM.GPT_4_1_2025_04_14,
-        messages=messages,
-        max_tokens=600,
-        temperature=0.2
-    )
-except Exception as e:
-    import traceback
-    print("FULL ERROR:\n", traceback.format_exc())
-    raise
-    raw = result.chat_output.get("content", "") if result.chat_output else ""
+        result = client.llm.chat(
+            model=og.TEE_LLM.GPT_4_1_2025_04_14,
+            messages=messages,
+            max_tokens=600,
+            temperature=0.2,
+            auto_pay=True  # important for serverless
+        )
+    except Exception as e:
+        print("FULL ERROR:\n", traceback.format_exc())
+        raise
+
+    raw = ""
+    if result.chat_output:
+        raw = result.chat_output.get("content", "") or ""
+
     parsed = parse_ai_response(raw)
 
     return {
@@ -82,14 +95,17 @@ except Exception as e:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": result.payment_hash,
-        "title": parsed.get("title"),
-        "scores": parsed.get("scores"),
-        "analysis": parsed.get("analysis"),
-        "similar": parsed.get("similar")
+        "payment_hash": getattr(result, "payment_hash", None),
+        "title": parsed.get("title", "Idea certificate"),
+        "scores": parsed.get("scores", {}),
+        "analysis": parsed.get("analysis", ""),
+        "similar": parsed.get("similar", [])
     }
 
+
+# ✅ THIS MUST BE TOP-LEVEL (DO NOT INDENT)
 class handler(BaseHTTPRequestHandler):
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors()
@@ -98,21 +114,31 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
+            raw = self.rfile.read(length)
+
+            try:
+                body = json.loads(raw)
+            except Exception:
+                self._error(400, "Invalid JSON body.")
+                return
+
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
             if len(idea) < 30:
                 self._error(400, "Idea must be at least 30 characters.")
                 return
+
             if not author:
                 self._error(400, "Author name is required.")
                 return
+
             if not PRIVATE_KEY:
                 self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            self._json(200, run_inference(idea, author))
+            result = run_inference(idea, author)
+            self._json(200, result)
 
         except Exception as e:
             self._error(500, str(e))
@@ -123,7 +149,11 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, code, data):
-        payload = json.dumps(data).encode()
+        try:
+            payload = json.dumps(data).encode()
+        except Exception:
+            payload = b'{"error":"serialization failed"}'
+
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(payload))
@@ -135,4 +165,4 @@ class handler(BaseHTTPRequestHandler):
         self._json(code, {"error": msg})
 
     def log_message(self, *args):
-        pass
+        return
