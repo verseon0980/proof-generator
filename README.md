@@ -5,8 +5,7 @@
 proof-generator/
 ├── api/
 │   └── certify.py        ← Python backend (OpenGradient SDK)
-├── public/
-│   └── index.html        ← Frontend (single file)
+├── index.html        ← Frontend (single file)
 ├── requirements.txt
 └── vercel.json
 ```
