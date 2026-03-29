@@ -6,9 +6,15 @@ import re
 import traceback
 from http.server import BaseHTTPRequestHandler
 
-import opengradient as og
+import requests
+from eth_account import Account
+from x402v2 import x402Client
+from x402v2.mechanisms.evm import EthAccountSigner
+from x402v2.mechanisms.evm.exact.register import register_exact_evm_client
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
+
+TEE_URL = "https://3.15.214.21/v1/chat/completions"
 
 
 def generate_cert_id():
@@ -44,14 +50,16 @@ def parse_ai_response(raw: str) -> dict:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    client = og.Client(private_key=PRIVATE_KEY)
+    try:
+        account = Account.from_key(PRIVATE_KEY)
+        signer = EthAccountSigner(account)
 
-    # approval (keep this)
-    client.llm.ensure_opg_approval(opg_amount=1.0)
+        xclient = x402Client()
+        register_exact_evm_client(xclient, signer)
 
-    messages = [{
-        "role": "user",
-        "content": f"""You are an AI that evaluates the originality of ideas.
+        messages = [{
+            "role": "user",
+            "content": f"""You are an AI that evaluates the originality of ideas.
 
 Idea: \"\"\"{idea}\"\"\"
 
@@ -68,42 +76,61 @@ Return ONLY valid JSON:
   "analysis": "<2-3 sentence analysis>",
   "similar": []
 }}"""
-    }]
+        }]
 
-    # 🔴 DEBUG + LLM CALL (CORRECT PLACE)
-    try:
-        result = client.llm.chat(
-            model=og.TEE_LLM.GPT_4_1_2025_04_14,
-            messages=messages,
-            max_tokens=600,
-            temperature=0.2
-            
-        )
+        payload = {
+            "model": "gpt-4.1",
+            "messages": messages,
+            "max_tokens": 600,
+            "temperature": 0.2
+        }
+
+        # 1️⃣ First request (will return 402)
+        res = requests.post(TEE_URL, json=payload)
+
+        if res.status_code == 402:
+            # 2️⃣ Extract payment requirements
+            try:
+                requirements = res.json()
+            except Exception:
+                raise Exception("Failed to parse payment requirements from 402")
+
+            # 3️⃣ Generate payment headers
+            payment_headers = xclient.create_payment_headers(requirements)
+
+            # 4️⃣ Retry request with payment
+            res = requests.post(TEE_URL, json=payload, headers=payment_headers)
+
+        if res.status_code != 200:
+            raise Exception(f"TEE request failed: {res.text}")
+
+        data = res.json()
+
+        raw = ""
+        if "choices" in data and len(data["choices"]) > 0:
+            raw = data["choices"][0]["message"]["content"]
+
+        parsed = parse_ai_response(raw)
+
+        return {
+            "cert_id": generate_cert_id(),
+            "author": author,
+            "idea": idea,
+            "idea_hash": hash_idea(idea),
+            "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
+            "payment_hash": res.headers.get("x-payment-hash"),
+            "title": parsed.get("title", "Idea certificate"),
+            "scores": parsed.get("scores", {}),
+            "analysis": parsed.get("analysis", ""),
+            "similar": parsed.get("similar", [])
+        }
+
     except Exception as e:
         print("FULL ERROR:\n", traceback.format_exc())
         raise
 
-    raw = ""
-    if result.chat_output:
-        raw = result.chat_output.get("content", "") or ""
 
-    parsed = parse_ai_response(raw)
-
-    return {
-        "cert_id": generate_cert_id(),
-        "author": author,
-        "idea": idea,
-        "idea_hash": hash_idea(idea),
-        "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": getattr(result, "payment_hash", None),
-        "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {}),
-        "analysis": parsed.get("analysis", ""),
-        "similar": parsed.get("similar", [])
-    }
-
-
-# ✅ THIS MUST BE TOP-LEVEL (DO NOT INDENT)
+# ✅ VERCEL HANDLER (DO NOT TOUCH STRUCTURE)
 class handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
