@@ -96,6 +96,24 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Patch _build_x402_client to use wildcard network eip155:*
+            # instead of hardcoded eip155:84532 — fixes payment scheme mismatch
+            from eth_account import Account as _Account
+            from x402.client import x402Client as _x402Client
+            from x402.mechanisms.evm import EthAccountSigner as _Signer
+            from opengradient.client.llm import (
+                register_exact_evm_client as _exact,
+                register_upto_evm_client as _upto,
+            )
+            def _patched_build(private_key):
+                account = _Account.from_key(private_key)
+                signer = _Signer(account)
+                client = _x402Client()
+                _exact(client, signer)   # no networks= → eip155:* wildcard
+                _upto(client, signer)    # no networks= → eip155:* wildcard
+                return client
+            og.LLM._build_x402_client = staticmethod(_patched_build)
+
             llm = og.LLM(private_key=PRIVATE_KEY)
             llm.ensure_opg_approval(0.1)
             out['data'] = loop.run_until_complete(_infer(idea, author, llm))
@@ -112,7 +130,6 @@ def run_inference(idea: str, author: str) -> dict:
     if 'e' in err:
         raise RuntimeError(err['e'])
     return out['data']
-
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
