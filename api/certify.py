@@ -62,13 +62,17 @@ Return ONLY valid JSON:
 }}"""
     }]
 
+    try:
     result = client.llm.chat(
         model=og.TEE_LLM.GPT_4_1_2025_04_14,
         messages=messages,
         max_tokens=600,
         temperature=0.2
     )
-
+except Exception as e:
+    import traceback
+    print("FULL ERROR:\n", traceback.format_exc())
+    raise
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
