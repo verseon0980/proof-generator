@@ -21,24 +21,86 @@ def hash_idea(idea: str) -> str:
     return "0x" + hashlib.sha256(idea.encode()).hexdigest()
 
 
+def extract_text_from_result(result) -> str:
+    """
+    Safely extract the text string from an OpenGradient completion result.
+    Handles: plain string, object with .completion_output (str or list),
+    object with .content (list of blocks), or dict.
+    """
+    # 1. Already a plain string
+    if isinstance(result, str):
+        return result
+
+    # 2. Dict-like
+    if isinstance(result, dict):
+        for key in ("completion_output", "content", "text", "output"):
+            val = result.get(key)
+            if val:
+                return extract_text_from_result(val)
+        return json.dumps(result)
+
+    # 3. List — could be a list of content blocks or a list of strings
+    if isinstance(result, list):
+        parts = []
+        for item in result:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                # Anthropic-style block: {"type": "text", "text": "..."}
+                text = item.get("text") or item.get("content") or ""
+                if text:
+                    parts.append(text)
+            elif hasattr(item, "text"):
+                parts.append(str(item.text))
+        return " ".join(parts)
+
+    # 4. Object with .completion_output attribute
+    if hasattr(result, "completion_output"):
+        return extract_text_from_result(result.completion_output)
+
+    # 5. Object with .content attribute
+    if hasattr(result, "content"):
+        return extract_text_from_result(result.content)
+
+    # 6. Object with .text attribute
+    if hasattr(result, "text"):
+        return str(result.text)
+
+    # 7. Fallback: stringify whatever we got
+    return str(result)
+
+
 def parse_ai_response(raw: str) -> dict:
     """Parse JSON from AI response, stripping markdown fences if present."""
-    clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+    clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
+
+    # Try to find a JSON object even if there's surrounding text
+    match = re.search(r'\{.*\}', clean, re.DOTALL)
+    if match:
+        clean = match.group(0)
+
     try:
         return json.loads(clean)
     except Exception:
-        # Fallback: return a safe default
         return {
             "title": "Idea certificate",
-            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "scores": {
+                "overall": 70,
+                "novelty": 70,
+                "market_gap": 70,
+                "technical": 70,
+                "prior_art_risk": 30
+            },
             "analysis": raw[:500] if raw else "Analysis unavailable.",
             "similar": []
         }
 
-async def run_inference(idea: str, author: str) -> dict:
-    llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
 
+def run_inference_sync(idea: str, author: str) -> dict:
+    """
+    Synchronous wrapper around OpenGradient inference.
+    Handles both sync and async SDK variants gracefully.
+    """
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
 
 A user has submitted the following idea:
@@ -65,20 +127,49 @@ Return ONLY valid JSON, no markdown, no extra text:
     {{
       "name": "<name of similar product or patent>",
       "difference": "<one sentence: how this idea differs from it>",
-      "risk": "low" or "medium"
+      "risk": "low"
     }}
   ]
 }}"""
 
-    result = await llm.completion(
-        model='gpt-4o-mini',
-        prompt=prompt,
-        max_tokens=300,
-        temperature=0.2
-    )
+    llm = og.LLM(private_key=PRIVATE_KEY)
 
-    parsed = parse_ai_response(result.completion_output)
-    payment_hash = getattr(result, 'payment_hash', None)
+    # Some SDK versions require approval; wrap in try/except so it doesn't crash
+    try:
+        llm.ensure_opg_approval(0.1)
+    except Exception:
+        pass
+
+    payment_hash = None
+
+    # Try async completion first, then fall back to sync
+    try:
+        result = asyncio.run(
+            llm.completion(
+                model='gpt-4o-mini',
+                prompt=prompt,
+                max_tokens=600,
+                temperature=0.2
+            )
+        )
+    except (RuntimeError, AttributeError):
+        # asyncio.run fails if there's already a running loop,
+        # or if the method is synchronous
+        result = llm.completion(
+            model='gpt-4o-mini',
+            prompt=prompt,
+            max_tokens=600,
+            temperature=0.2
+        )
+
+    # Safely pull the payment hash if the SDK provides it
+    if hasattr(result, 'payment_hash'):
+        payment_hash = result.payment_hash
+    elif isinstance(result, dict):
+        payment_hash = result.get('payment_hash')
+
+    raw_text = extract_text_from_result(result)
+    parsed = parse_ai_response(raw_text)
 
     return {
         "cert_id": generate_cert_id(),
@@ -88,7 +179,13 @@ Return ONLY valid JSON, no markdown, no extra text:
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
         "payment_hash": payment_hash,
         "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {}),
+        "scores": parsed.get("scores", {
+            "overall": 70,
+            "novelty": 70,
+            "market_gap": 70,
+            "technical": 70,
+            "prior_art_risk": 30
+        }),
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
@@ -117,11 +214,13 @@ class handler(BaseHTTPRequestHandler):
                 self._error(500, "Server configuration error: missing OG_PRIVATE_KEY.")
                 return
 
-            result = asyncio.run(run_inference(idea, author))
+            result = run_inference_sync(idea, author)
             self._json(200, result)
 
+        except json.JSONDecodeError:
+            self._error(400, "Invalid JSON in request body.")
         except Exception as e:
-            self._error(500, str(e))
+            self._error(500, f"Internal error: {str(e)}")
 
     def _set_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
