@@ -47,8 +47,8 @@ def run_inference(idea: str, author: str) -> dict:
     client = og.Client(private_key=PRIVATE_KEY)
 
     result = client.llm.completion(
-        model=og.TEE_LLM.GPT_4O_MINI,
-        prompt=f"""You are an AI that evaluates the originality of ideas.
+    model=og.TEE_LLM.GPT_4_1_2025_04_14,
+    prompt=f"""You are an AI that evaluates the originality of ideas.
 
 Idea: \"\"\"{idea}\"\"\"
 
@@ -65,10 +65,9 @@ Return ONLY valid JSON:
   "analysis": "<2-3 sentence analysis>",
   "similar": []
 }}""",
-        max_tokens=600,
-        temperature=0.2
-    )
-
+    max_tokens=600,
+    temperature=0.2
+)
     raw = result.output if hasattr(result, "output") else ""
 
     parsed = parse_ai_response(raw)
