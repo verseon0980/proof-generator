@@ -12,6 +12,15 @@ from opengradient import TEE_LLM
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
+def do_GET(self):
+    from eth_account import Account
+    pk = os.environ.get("OG_PRIVATE_KEY", "")
+    if not pk:
+        self._json(500, {"error": "OG_PRIVATE_KEY not set"})
+        return
+    wallet = Account.from_key(pk)
+    self._json(200, {"address": wallet.address})
+
 def generate_cert_id():
     now = datetime.datetime.utcnow()
     rand = hashlib.sha256(str(now.timestamp()).encode()).hexdigest()[:4].upper()
