@@ -12,6 +12,7 @@ from opengradient import TEE_LLM
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
+
 def generate_cert_id():
     now = datetime.datetime.utcnow()
     rand = hashlib.sha256(str(now.timestamp()).encode()).hexdigest()[:4].upper()
@@ -23,7 +24,6 @@ def hash_idea(idea: str) -> str:
 
 
 def parse_ai_response(raw: str) -> dict:
-    """Parse JSON from AI response, stripping markdown fences if present."""
     clean = re.sub(r"```(?:json)?", "", raw or "").strip().rstrip("`").strip()
     match = re.search(r'\{.*\}', clean, re.DOTALL)
     if match:
@@ -45,7 +45,7 @@ def parse_ai_response(raw: str) -> dict:
         }
 
 
-async def _run_inference_async(idea: str, author: str) -> dict:
+async def _run_inference_async(idea: str, author: str, llm: og.LLM) -> dict:
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
 
 A user has submitted the following idea:
@@ -77,20 +77,11 @@ Return ONLY valid JSON, no markdown, no extra text:
   ]
 }}"""
 
-    llm = og.LLM(private_key=PRIVATE_KEY)
-
-    try:
-        llm.ensure_opg_approval(0.1)
-    except Exception:
-        pass
-
-    # MUST pass a TEE_LLM enum value, NOT a plain string like 'gpt-4o-mini'.
-    # The SDK does model.split("/")[1] internally — a string without "/" causes
-    # the "list index out of range" error.
+    # MUST use TEE_LLM enum — plain strings cause "list index out of range"
     result = await llm.completion(
         model=TEE_LLM.GPT_4_1_2025_04_14,
         prompt=prompt,
-        max_tokens=300,
+        max_tokens=600,
         temperature=0.2
     )
 
@@ -119,11 +110,6 @@ Return ONLY valid JSON, no markdown, no extra text:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    """
-    Run async inference safely from a sync context.
-    Uses a dedicated thread with its own event loop to avoid
-    'cannot run nested event loop' errors in WSGI/threaded servers.
-    """
     result_container = {}
     error_container = {}
 
@@ -131,8 +117,14 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Create LLM and run Permit2 approval synchronously FIRST
+            # This must happen in sync context before any async calls
+            llm = og.LLM(private_key=PRIVATE_KEY)
+            llm.ensure_opg_approval(min_allowance=1.0, approve_amount=10.0)
+
+            # Now run the async inference with the approved llm
             result_container['data'] = loop.run_until_complete(
-                _run_inference_async(idea, author)
+                _run_inference_async(idea, author, llm)
             )
         except Exception as e:
             error_container['error'] = e
