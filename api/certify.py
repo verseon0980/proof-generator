@@ -75,8 +75,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         model=og.TEE_LLM.GPT_5,
         prompt=prompt,
         max_tokens=300,
-        temperature=0.2,
-        stop=["}"]
+        temperature=0.2
     )
 
     parsed = parse_ai_response(result.completion_output)
