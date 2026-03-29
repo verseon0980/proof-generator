@@ -22,33 +22,18 @@ def hash_idea(idea: str) -> str:
 
 
 def parse_ai_response(raw: str) -> dict:
+    """Parse JSON from AI response, stripping markdown fences if present."""
+    clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
     try:
-        clean = raw.strip().strip("```").replace("json", "")
-        data = json.loads(clean)
-
-        # Ensure structure is always correct
-        if not isinstance(data.get("similar"), list):
-            data["similar"] = []
-
-        if not isinstance(data.get("scores"), dict):
-            data["scores"] = {}
-
-        return data
-
+        return json.loads(clean)
     except Exception:
+        # Fallback: return a safe default
         return {
             "title": "Idea certificate",
-            "scores": {
-                "overall": 70,
-                "novelty": 70,
-                "market_gap": 70,
-                "technical": 70,
-                "prior_art_risk": 30
-            },
-            "analysis": "AI response parsing failed.",
+            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "analysis": raw[:500] if raw else "Analysis unavailable.",
             "similar": []
         }
-
 
 async def run_inference(idea: str, author: str) -> dict:
     llm = og.LLM(private_key=PRIVATE_KEY)
@@ -92,12 +77,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         temperature=0.2
     )
 
-    raw_output = getattr(result, "completion_output", "")
-
-if not raw_output:
-    raise Exception("Empty response from LLM")
-
-parsed = parse_ai_response(raw_output)
+    parsed = parse_ai_response(result.completion_output)
     payment_hash = getattr(result, 'payment_hash', None)
 
     return {
