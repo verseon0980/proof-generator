@@ -76,8 +76,8 @@ Return ONLY valid JSON:
             model=og.TEE_LLM.GPT_4_1_2025_04_14,
             messages=messages,
             max_tokens=600,
-            temperature=0.2,
-            auto_pay=True  # important for serverless
+            temperature=0.2
+            
         )
     except Exception as e:
         print("FULL ERROR:\n", traceback.format_exc())
