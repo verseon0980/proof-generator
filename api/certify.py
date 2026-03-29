@@ -9,9 +9,16 @@ from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
 from opengradient import TEE_LLM
+from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
+pk = os.environ["OG_PRIVATE_KEY"]
+wallet = Account.from_key(pk)
+print(wallet.address)
 
+llm = og.LLM(private_key=os.environ["OG_PRIVATE_KEY"])
+result = llm.ensure_opg_approval(min_allowance=1.0, approve_amount=10.0)
+print("Approved:", result)
 
 def generate_cert_id():
     now = datetime.datetime.utcnow()
