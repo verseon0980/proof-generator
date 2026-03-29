@@ -76,8 +76,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         prompt=prompt,
         max_tokens=300,
         temperature=0.2,
-        stop=["}"],
-        x402_settlement_mode=og.x402SettlementMode.SETTLE_METADATA
+        stop=["}"]
     )
 
     parsed = parse_ai_response(result.completion_output)
