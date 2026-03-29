@@ -66,12 +66,18 @@ Return ONLY valid JSON, no markdown, no extra text:
   ]
 }}"""
 
-    result = await llm.completion(
-        model_cid='gpt-4',
-        prompt=prompt,
-        max_tokens=600,
-        temperature=0.2
-    )
+    # result = await llm.completion(
+    #     model_cid='gpt-4',
+    #     prompt=prompt,
+    #     max_tokens=600,
+    #     temperature=0.2
+    # )
+    result = og.global_client.text_generation(
+                prompt=prompt,
+                model_cid='gpt-4',
+                max_tokens=60,
+                temperature=1.0  # High temperature for more variety
+            )
     parsed = parse_ai_response(result.completion_output or "")
     return {
         "cert_id": generate_cert_id(),
