@@ -456,7 +456,7 @@ async function submitIdea() {
   }, 2200);
 
   try {
-    const res = await fetch('/api/certify', {
+    const res = await fetch('/certify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idea, author })
