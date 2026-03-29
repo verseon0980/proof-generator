@@ -1,15 +1,12 @@
 import os
 import json
 import hashlib
-import asyncio
 import datetime
 import re
-import threading
 import traceback
 from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
-from opengradient import TEE_LLM
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
@@ -40,40 +37,53 @@ def parse_ai_response(raw: str) -> dict:
         }
 
 
-async def _infer(idea: str, author: str, llm) -> dict:
-    prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
+def run_inference(idea: str, author: str) -> dict:
+    # og.Client uses a hardcoded TEE server URL — no registry lookup, no payment scheme mismatch
+    client = og.Client(private_key=PRIVATE_KEY)
+    client.llm.ensure_opg_approval(opg_amount=1.0)
 
-A user submitted this idea:
-\"\"\"{idea}\"\"\"
+    messages = [
+        {
+            "role": "user",
+            "content": f"""You are an AI that evaluates the originality of ideas.
+
+Idea: \"\"\"{idea}\"\"\"
 
 Return ONLY valid JSON, no markdown, no extra text:
 {{
   "title": "<short 5-8 word title>",
   "scores": {{
-    "overall": <0-100>,
-    "novelty": <0-100>,
-    "market_gap": <0-100>,
-    "technical": <0-100>,
-    "prior_art_risk": <0-100>
+    "overall": <integer 0-100>,
+    "novelty": <integer 0-100>,
+    "market_gap": <integer 0-100>,
+    "technical": <integer 0-100>,
+    "prior_art_risk": <integer 0-100>
   }},
   "analysis": "<2-3 sentence analysis>",
   "similar": [
     {{
       "name": "<similar product>",
-      "difference": "<one sentence difference>",
+      "difference": "<one sentence>",
       "risk": "low"
     }}
   ]
 }}"""
+        }
+    ]
 
-    result = await llm.completion(
-        model=TEE_LLM.GPT_4_1_2025_04_14,
-        prompt=prompt,
-        max_tokens=300,
+    result = client.llm.chat(
+        model=og.TEE_LLM.GPT_4_1_2025_04_14,
+        messages=messages,
+        max_tokens=600,
         temperature=0.2
     )
-    
-    parsed = parse_ai_response(result.completion_output or "")
+
+    raw = ""
+    if result.chat_output:
+        raw = result.chat_output.get("content", "") or ""
+
+    parsed = parse_ai_response(raw)
+
     return {
         "cert_id": generate_cert_id(),
         "author": author,
@@ -88,49 +98,6 @@ Return ONLY valid JSON, no markdown, no extra text:
     }
 
 
-def run_inference(idea: str, author: str) -> dict:
-    out = {}
-    err = {}
-
-    def target():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Patch _build_x402_client to use wildcard network eip155:*
-            # instead of hardcoded eip155:84532 — fixes payment scheme mismatch
-            from eth_account import Account as _Account
-            from x402.client import x402Client as _x402Client
-            from x402.mechanisms.evm import EthAccountSigner as _Signer
-            from opengradient.client.llm import (
-                register_exact_evm_client as _exact,
-                register_upto_evm_client as _upto,
-            )
-            def _patched_build(private_key):
-                account = _Account.from_key(private_key)
-                signer = _Signer(account)
-                client = _x402Client()
-                _exact(client, signer)   # no networks= → eip155:* wildcard
-                _upto(client, signer)    # no networks= → eip155:* wildcard
-                return client
-            og.LLM._build_x402_client = staticmethod(_patched_build)
-
-            llm = og.LLM(private_key=PRIVATE_KEY)
-            llm.ensure_opg_approval(0.1)
-            out['data'] = loop.run_until_complete(_infer(idea, author, llm))
-        except Exception as e:
-            err['msg'] = traceback.format_exc()
-            err['e'] = str(e)
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=target)
-    t.start()
-    t.join()
-
-    if 'e' in err:
-        raise RuntimeError(err['e'])
-    return out['data']
-
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
@@ -138,16 +105,9 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        # Always send JSON — never let Python send its own error page
         try:
             length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length)
-            try:
-                body = json.loads(raw)
-            except Exception:
-                self._error(400, "Invalid JSON body.")
-                return
-
+            body = json.loads(self.rfile.read(length))
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
@@ -161,15 +121,10 @@ class handler(BaseHTTPRequestHandler):
                 self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            try:
-                result = run_inference(idea, author)
-                self._json(200, result)
-            except Exception as e:
-                self._error(500, str(e))
+            self._json(200, run_inference(idea, author))
 
         except Exception as e:
-            # Last resort — still send JSON
-            self._error(500, f"Unexpected error: {str(e)}")
+            self._error(500, str(e))
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -177,10 +132,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, code, data):
-        try:
-            payload = json.dumps(data).encode()
-        except Exception:
-            payload = b'{"error": "Failed to serialize response"}'
+        payload = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(payload))
