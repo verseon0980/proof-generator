@@ -6,7 +6,7 @@
   ],
   "routes": [
     { "src": "/api/certify", "dest": "/api/certify.py" },
-    { "src": "/", "dest": "/public/index.html" },   ← ADD THIS LINE
+    { "src": "/", "dest": "/public/index.html" },  
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }
