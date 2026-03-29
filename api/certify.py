@@ -72,7 +72,7 @@ Return ONLY valid JSON, no markdown, no extra text:
 }}"""
 
     result = await llm.completion(
-        model=og.TEE_LLM.GPT_5,
+        model='gpt-4o-mini',
         prompt=prompt,
         max_tokens=300,
         temperature=0.2
