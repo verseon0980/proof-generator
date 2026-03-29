@@ -22,16 +22,30 @@ def hash_idea(idea: str) -> str:
 
 
 def parse_ai_response(raw: str) -> dict:
-    """Parse JSON from AI response, stripping markdown fences if present."""
-    clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
     try:
-        return json.loads(clean)
+        clean = raw.strip().strip("```").replace("json", "")
+        data = json.loads(clean)
+
+        # Ensure structure is always correct
+        if not isinstance(data.get("similar"), list):
+            data["similar"] = []
+
+        if not isinstance(data.get("scores"), dict):
+            data["scores"] = {}
+
+        return data
+
     except Exception:
-        # Fallback: return a safe default
         return {
             "title": "Idea certificate",
-            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
-            "analysis": raw[:500] if raw else "Analysis unavailable.",
+            "scores": {
+                "overall": 70,
+                "novelty": 70,
+                "market_gap": 70,
+                "technical": 70,
+                "prior_art_risk": 30
+            },
+            "analysis": "AI response parsing failed.",
             "similar": []
         }
 
