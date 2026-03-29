@@ -38,51 +38,29 @@ def parse_ai_response(raw: str) -> dict:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    from eth_account import Account
-    from x402v2 import x402Client as x402Clientv2
-    from x402v2.mechanisms.evm import EthAccountSigner as EthAccountSignerv2
-    from x402v2.mechanisms.evm.exact.register import register_exact_evm_client as reg_exact
-    from x402v2.mechanisms.evm.upto.register import register_upto_evm_client as reg_upto
-
     client = og.Client(private_key=PRIVATE_KEY)
     client.llm.ensure_opg_approval(opg_amount=1.0)
 
-    # Patch x402 client to use wildcard eip155:* instead of locked eip155:84532
-    account = Account.from_key(PRIVATE_KEY)
-    signer = EthAccountSignerv2(account)
-    new_x402 = x402Clientv2()
-    reg_exact(new_x402, signer)   # no networks= → wildcard
-    reg_upto(new_x402, signer)    # no networks= → wildcard
-    client.llm._x402_client = new_x402
-
-    messages = [
-        {
-            "role": "user",
-            "content": f"""You are an AI that evaluates the originality of ideas.
+    messages = [{
+        "role": "user",
+        "content": f"""You are an AI that evaluates the originality of ideas.
 
 Idea: \"\"\"{idea}\"\"\"
 
-Return ONLY valid JSON, no markdown:
+Return ONLY valid JSON:
 {{
   "title": "<short 5-8 word title>",
   "scores": {{
-    "overall": <integer 0-100>,
-    "novelty": <integer 0-100>,
-    "market_gap": <integer 0-100>,
-    "technical": <integer 0-100>,
-    "prior_art_risk": <integer 0-100>
+    "overall": <0-100>,
+    "novelty": <0-100>,
+    "market_gap": <0-100>,
+    "technical": <0-100>,
+    "prior_art_risk": <0-100>
   }},
   "analysis": "<2-3 sentence analysis>",
-  "similar": [
-    {{
-      "name": "<similar product>",
-      "difference": "<one sentence>",
-      "risk": "low"
-    }}
-  ]
+  "similar": []
 }}"""
-        }
-    ]
+    }]
 
     result = client.llm.chat(
         model=og.TEE_LLM.GPT_4_1_2025_04_14,
@@ -91,10 +69,7 @@ Return ONLY valid JSON, no markdown:
         temperature=0.2
     )
 
-    raw = ""
-    if result.chat_output:
-        raw = result.chat_output.get("content", "") or ""
-
+    raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
     return {
@@ -104,10 +79,10 @@ Return ONLY valid JSON, no markdown:
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
         "payment_hash": result.payment_hash,
-        "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
-        "analysis": parsed.get("analysis", ""),
-        "similar": parsed.get("similar", [])
+        "title": parsed.get("title"),
+        "scores": parsed.get("scores"),
+        "analysis": parsed.get("analysis"),
+        "similar": parsed.get("similar")
     }
 
 class handler(BaseHTTPRequestHandler):
