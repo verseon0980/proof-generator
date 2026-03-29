@@ -6,15 +6,9 @@ import re
 import traceback
 from http.server import BaseHTTPRequestHandler
 
-import requests
-from eth_account import Account
-from x402v2 import x402Client
-from x402v2.mechanisms.evm import EthAccountSigner
-from x402v2.mechanisms.evm.exact.register import register_exact_evm_client
+import opengradient as og
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
-
-TEE_URL = "https://3.15.214.21/v1/chat/completions"
 
 
 def generate_cert_id():
@@ -44,18 +38,17 @@ def parse_ai_response(raw: str) -> dict:
                 "technical": 70,
                 "prior_art_risk": 30
             },
-            "analysis": (raw or "")[:500] or "Analysis unavailable.",
+            "analysis": (raw or "")[:500],
             "similar": []
         }
 
 
 def run_inference(idea: str, author: str) -> dict:
     try:
-        account = Account.from_key(PRIVATE_KEY)
-        signer = EthAccountSigner(account)
+        client = og.Client(private_key=PRIVATE_KEY)
 
-        xclient = x402Client()
-        register_exact_evm_client(xclient, signer)
+        # 🔴 CRITICAL DEBUG (you MUST check this in logs)
+        print("BASE URL:", getattr(client.llm, "base_url", "NO BASE URL"))
 
         messages = [{
             "role": "user",
@@ -78,37 +71,16 @@ Return ONLY valid JSON:
 }}"""
         }]
 
-        payload = {
-            "model": "gpt-4.1",
-            "messages": messages,
-            "max_tokens": 600,
-            "temperature": 0.2
-        }
-
-        # 1️⃣ First request (will return 402)
-        res = requests.post(TEE_URL, json=payload)
-
-        if res.status_code == 402:
-            # 2️⃣ Extract payment requirements
-            try:
-                requirements = res.json()
-            except Exception:
-                raise Exception("Failed to parse payment requirements from 402")
-
-            # 3️⃣ Generate payment headers
-            payment_headers = xclient.create_payment_headers(requirements)
-
-            # 4️⃣ Retry request with payment
-            res = requests.post(TEE_URL, json=payload, headers=payment_headers)
-
-        if res.status_code != 200:
-            raise Exception(f"TEE request failed: {res.text}")
-
-        data = res.json()
+        result = client.llm.chat(
+            model=og.TEE_LLM.GPT_4_1_2025_04_14,
+            messages=messages,
+            max_tokens=600,
+            temperature=0.2
+        )
 
         raw = ""
-        if "choices" in data and len(data["choices"]) > 0:
-            raw = data["choices"][0]["message"]["content"]
+        if result.chat_output:
+            raw = result.chat_output.get("content", "")
 
         parsed = parse_ai_response(raw)
 
@@ -118,11 +90,11 @@ Return ONLY valid JSON:
             "idea": idea,
             "idea_hash": hash_idea(idea),
             "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-            "payment_hash": res.headers.get("x-payment-hash"),
-            "title": parsed.get("title", "Idea certificate"),
-            "scores": parsed.get("scores", {}),
-            "analysis": parsed.get("analysis", ""),
-            "similar": parsed.get("similar", [])
+            "payment_hash": getattr(result, "payment_hash", None),
+            "title": parsed.get("title"),
+            "scores": parsed.get("scores"),
+            "analysis": parsed.get("analysis"),
+            "similar": parsed.get("similar")
         }
 
     except Exception as e:
@@ -130,7 +102,7 @@ Return ONLY valid JSON:
         raise
 
 
-# ✅ VERCEL HANDLER (DO NOT TOUCH STRUCTURE)
+# ✅ REQUIRED FOR VERCEL
 class handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
@@ -141,13 +113,7 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length)
-
-            try:
-                body = json.loads(raw)
-            except Exception:
-                self._error(400, "Invalid JSON body.")
-                return
+            body = json.loads(self.rfile.read(length))
 
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
@@ -176,11 +142,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, code, data):
-        try:
-            payload = json.dumps(data).encode()
-        except Exception:
-            payload = b'{"error":"serialization failed"}'
-
+        payload = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(payload))
