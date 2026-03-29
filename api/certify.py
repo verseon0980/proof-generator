@@ -7,13 +7,8 @@ import re
 import threading
 from http.server import BaseHTTPRequestHandler
 
-from eth_account import Account
-from x402.client import x402Client, register_exact_evm_client, register_upto_evm_client
-from x402.accounts.eth import EthAccountSigner
 import opengradient as og
 from opengradient import TEE_LLM
-from opengradient.client.llm import LLM, RegistryTEEConnection, TEERegistry
-from opengradient.client.llm import DEFAULT_RPC_URL, DEFAULT_TEE_REGISTRY_ADDRESS
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 
@@ -44,40 +39,11 @@ def parse_ai_response(raw: str) -> dict:
         }
 
 
-def build_llm_wildcard(private_key: str) -> og.LLM:
-    """
-    Build an LLM client that registers eip155:* wildcard instead of only eip155:84532.
-    The default SDK passes networks=[BASE_TESTNET_NETWORK] which locks to one chain ID.
-    If the TEE server returns a payment requirement for any other network/scheme variant,
-    x402 throws 'No payment requirements match registered schemes'.
-    Using the wildcard fixes this.
-    """
-    account = Account.from_key(private_key)
-    signer = EthAccountSigner(account)
-
-    # Register wildcard — no networks arg = eip155:* matches any EVM chain
-    x402_client = x402Client()
-    register_exact_evm_client(x402_client, signer)
-    register_upto_evm_client(x402_client, signer)
-
-    registry = TEERegistry(rpc_url=DEFAULT_RPC_URL, registry_address=DEFAULT_TEE_REGISTRY_ADDRESS)
-    llm = og.LLM.__new__(og.LLM)
-    llm._wallet_account = account
-    llm._tee = RegistryTEEConnection(x402_client=x402_client, registry=registry)
-    return llm
-
-
-async def _run_inference_async(idea: str, author: str, llm: og.LLM) -> dict:
+async def _infer(idea: str, author: str, llm) -> dict:
     prompt = f"""You are an AI that evaluates originality of ideas for a verifiable certificate system.
 
 A user has submitted the following idea:
 \"\"\"{idea}\"\"\"
-
-Your task:
-1. Search your knowledge for similar existing products, startups, and patents.
-2. Score the idea's originality across 4 dimensions (0-100 each).
-3. Write a concise analysis of what makes it unique (2-3 sentences).
-4. List 2-4 similar things that already exist, with what makes this idea different.
 
 Return ONLY valid JSON, no markdown, no extra text:
 {{
@@ -92,8 +58,8 @@ Return ONLY valid JSON, no markdown, no extra text:
   "analysis": "<2-3 sentence analysis of uniqueness>",
   "similar": [
     {{
-      "name": "<name of similar product or patent>",
-      "difference": "<one sentence: how this idea differs from it>",
+      "name": "<similar product or patent name>",
+      "difference": "<one sentence how this idea differs>",
       "risk": "low"
     }}
   ]
@@ -106,9 +72,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         temperature=0.2
     )
 
-    raw_text = result.completion_output or ""
-    parsed = parse_ai_response(raw_text)
-
+    parsed = parse_ai_response(result.completion_output or "")
     return {
         "cert_id": generate_cert_id(),
         "author": author,
@@ -124,37 +88,34 @@ Return ONLY valid JSON, no markdown, no extra text:
 
 
 def run_inference(idea: str, author: str) -> dict:
-    result_container = {}
-    error_container = {}
+    out = {}
+    err = {}
 
-    def thread_target():
+    def target():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            llm = build_llm_wildcard(PRIVATE_KEY)
+            llm = og.LLM(private_key=PRIVATE_KEY)
             llm.ensure_opg_approval(0.1)
-            result_container['data'] = loop.run_until_complete(
-                _run_inference_async(idea, author, llm)
-            )
+            out['data'] = loop.run_until_complete(_infer(idea, author, llm))
         except Exception as e:
-            error_container['error'] = e
+            err['e'] = e
         finally:
             loop.close()
 
-    t = threading.Thread(target=thread_target)
+    t = threading.Thread(target=target)
     t.start()
     t.join()
 
-    if 'error' in error_container:
-        raise error_container['error']
-
-    return result_container['data']
+    if 'e' in err:
+        raise err['e']
+    return out['data']
 
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
-        self._set_cors()
+        self._cors()
         self.end_headers()
 
     def do_POST(self):
@@ -171,18 +132,15 @@ class handler(BaseHTTPRequestHandler):
                 self._error(400, "Author name is required.")
                 return
             if not PRIVATE_KEY:
-                self._error(500, "Server configuration error: missing OG_PRIVATE_KEY.")
+                self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            result = run_inference(idea, author)
-            self._json(200, result)
+            self._json(200, run_inference(idea, author))
 
-        except json.JSONDecodeError:
-            self._error(400, "Invalid JSON in request body.")
         except Exception as e:
             self._error(500, str(e))
 
-    def _set_cors(self):
+    def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -192,7 +150,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", len(payload))
-        self._set_cors()
+        self._cors()
         self.end_headers()
         self.wfile.write(payload)
 
