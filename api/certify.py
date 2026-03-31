@@ -50,8 +50,8 @@ async def _infer(idea: str, author: str) -> dict:
 
     llm = og.LLM(private_key=PRIVATE_KEY)
 
-    # ✅ CRITICAL: must await this or payment won't execute
-    await llm.ensure_opg_approval(0.1)
+    # ✅ Approval (sync in your SDK)
+    llm.ensure_opg_approval(0.1)
 
     messages = [
         {
@@ -71,13 +71,7 @@ Return ONLY valid JSON:
     "prior_art_risk": <integer 0-100>
   }},
   "analysis": "<2-3 sentence analysis>",
-  "similar": [
-    {{
-      "name": "<similar product>",
-      "difference": "<one sentence>",
-      "risk": "low"
-    }}
-  ]
+  "similar": []
 }}"""
         }
     ]
@@ -89,19 +83,28 @@ Return ONLY valid JSON:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # 🔍 DEBUG LOGS (IMPORTANT)
-    print("=== OG RESULT ===")
-    print("Payment Hash:", getattr(result, "payment_hash", None))
-    print("Full Result:", result)
-    print("=================")
-
-    raw = result.chat_output.get("content", "") if result.chat_output else ""
-    parsed = parse_ai_response(raw)
-
+    # 🔥 STRICT ENFORCEMENT
     payment_hash = getattr(result, "payment_hash", None)
 
+    print("=== STRICT DEBUG ===")
+    print("payment_hash:", payment_hash)
+    print("full result:", result)
+    print("====================")
+
+    # ❌ HARD FAIL if no real tx
     if not payment_hash:
-        raise RuntimeError("Payment did NOT execute — no tx hash returned")
+        raise RuntimeError(
+            "❌ PAYMENT NOT EXECUTED\n"
+            "No transaction was created.\n"
+            "Fix: fund wallet / correct network / disable fallback."
+        )
+
+    # ❌ ALSO FAIL if empty output (safety)
+    if not result.chat_output:
+        raise RuntimeError("❌ AI returned empty response")
+
+    raw = result.chat_output.get("content", "")
+    parsed = parse_ai_response(raw)
 
     return {
         "cert_id": generate_cert_id(),
@@ -112,13 +115,7 @@ Return ONLY valid JSON:
         "payment_hash": payment_hash,
         "explorer_url": f"https://explorer.opengradient.ai/tx/{payment_hash}",
         "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {
-            "overall": 70,
-            "novelty": 70,
-            "market_gap": 70,
-            "technical": 70,
-            "prior_art_risk": 30
-        }),
+        "scores": parsed.get("scores", {}),
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
@@ -177,7 +174,8 @@ class handler(BaseHTTPRequestHandler):
             self._json(200, result)
 
         except Exception as e:
-            self._error(500, str(e))
+            # 🔥 IMPORTANT: return real error
+            self._json(500, {"error": str(e)})
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
