@@ -1,9 +1,10 @@
 import os
 import json
 import hashlib
+import asyncio
 import datetime
 import re
-import traceback
+import threading
 from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
@@ -31,45 +32,54 @@ def parse_ai_response(raw: str) -> dict:
     except Exception:
         return {
             "title": "Idea certificate",
-            "scores": {
-                "overall": 70,
-                "novelty": 70,
-                "market_gap": 70,
-                "technical": 70,
-                "prior_art_risk": 30
-            },
-            "analysis": (raw or "")[:500],
+            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
 
 
-def run_inference(idea: str, author: str) -> dict:
-    client = og.Client(private_key=PRIVATE_KEY)
+async def _infer(idea: str, author: str) -> dict:
+    # Exactly as per official example: og.LLM + ensure_opg_approval + INDIVIDUAL_FULL + GEMINI_2_5_FLASH
+    llm = og.LLM(private_key=PRIVATE_KEY)
+    llm.ensure_opg_approval(0.1)
 
-    result = client.llm.completion(
-    model=og.TEE_LLM.GPT_4_1_2025_04_14,
-    prompt=f"""You are an AI that evaluates the originality of ideas.
+    messages = [
+        {
+            "role": "user",
+            "content": f"""You are an AI that evaluates the originality of ideas.
 
 Idea: \"\"\"{idea}\"\"\"
 
-Return ONLY valid JSON:
+Return ONLY valid JSON, no markdown, no extra text:
 {{
   "title": "<short 5-8 word title>",
   "scores": {{
-    "overall": <0-100>,
-    "novelty": <0-100>,
-    "market_gap": <0-100>,
-    "technical": <0-100>,
-    "prior_art_risk": <0-100>
+    "overall": <integer 0-100>,
+    "novelty": <integer 0-100>,
+    "market_gap": <integer 0-100>,
+    "technical": <integer 0-100>,
+    "prior_art_risk": <integer 0-100>
   }},
   "analysis": "<2-3 sentence analysis>",
-  "similar": []
-}}""",
-    max_tokens=600,
-    temperature=0.2
-)
-    raw = result.output if hasattr(result, "output") else ""
+  "similar": [
+    {{
+      "name": "<similar product>",
+      "difference": "<one sentence>",
+      "risk": "low"
+    }}
+  ]
+}}"""
+        }
+    ]
 
+    result = await llm.chat(
+        model=og.TEE_LLM.GEMINI_2_5_FLASH,
+        messages=messages,
+        max_tokens=600,
+        x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
+    )
+
+    raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
     return {
@@ -78,14 +88,38 @@ Return ONLY valid JSON:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": getattr(result, "payment_hash", None),
-        "title": parsed.get("title"),
-        "scores": parsed.get("scores"),
-        "analysis": parsed.get("analysis"),
-        "similar": parsed.get("similar")
+        "payment_hash": result.payment_hash,
+        "title": parsed.get("title", "Idea certificate"),
+        "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
+        "analysis": parsed.get("analysis", ""),
+        "similar": parsed.get("similar", [])
     }
-class handler(BaseHTTPRequestHandler):
 
+
+def run_inference(idea: str, author: str) -> dict:
+    out = {}
+    err = {}
+
+    def target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            out['data'] = loop.run_until_complete(_infer(idea, author))
+        except Exception as e:
+            err['e'] = str(e)
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=target)
+    t.start()
+    t.join()
+
+    if 'e' in err:
+        raise RuntimeError(err['e'])
+    return out['data']
+
+
+class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self._cors()
@@ -95,24 +129,20 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
-
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
             if len(idea) < 30:
                 self._error(400, "Idea must be at least 30 characters.")
                 return
-
             if not author:
                 self._error(400, "Author name is required.")
                 return
-
             if not PRIVATE_KEY:
                 self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            result = run_inference(idea, author)
-            self._json(200, result)
+            self._json(200, run_inference(idea, author))
 
         except Exception as e:
             self._error(500, str(e))
@@ -135,4 +165,4 @@ class handler(BaseHTTPRequestHandler):
         self._json(code, {"error": msg})
 
     def log_message(self, *args):
-        return
+        pass
