@@ -91,6 +91,7 @@ Return ONLY valid JSON:
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
         messages=messages,
         max_tokens=600,
+        temperature=0.7,
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
