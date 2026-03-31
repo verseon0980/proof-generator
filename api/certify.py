@@ -32,16 +32,26 @@ def parse_ai_response(raw: str) -> dict:
     except Exception:
         return {
             "title": "Idea certificate",
-            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "scores": {
+                "overall": 70,
+                "novelty": 70,
+                "market_gap": 70,
+                "technical": 70,
+                "prior_art_risk": 30
+            },
             "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # Exactly as per official example: og.LLM + ensure_opg_approval + INDIVIDUAL_FULL + GEMINI_2_5_FLASH
+    if not PRIVATE_KEY:
+        raise RuntimeError("Missing OG_PRIVATE_KEY")
+
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+
+    # ✅ CRITICAL: must await this or payment won't execute
+    await llm.ensure_opg_approval(0.1)
 
     messages = [
         {
@@ -50,7 +60,7 @@ async def _infer(idea: str, author: str) -> dict:
 
 Idea: \"\"\"{idea}\"\"\"
 
-Return ONLY valid JSON, no markdown, no extra text:
+Return ONLY valid JSON:
 {{
   "title": "<short 5-8 word title>",
   "scores": {{
@@ -79,8 +89,19 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
+    # 🔍 DEBUG LOGS (IMPORTANT)
+    print("=== OG RESULT ===")
+    print("Payment Hash:", getattr(result, "payment_hash", None))
+    print("Full Result:", result)
+    print("=================")
+
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
+
+    payment_hash = getattr(result, "payment_hash", None)
+
+    if not payment_hash:
+        raise RuntimeError("Payment did NOT execute — no tx hash returned")
 
     return {
         "cert_id": generate_cert_id(),
@@ -88,9 +109,16 @@ Return ONLY valid JSON, no markdown, no extra text:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": result.payment_hash,
+        "payment_hash": payment_hash,
+        "explorer_url": f"https://explorer.opengradient.ai/tx/{payment_hash}",
         "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
+        "scores": parsed.get("scores", {
+            "overall": 70,
+            "novelty": 70,
+            "market_gap": 70,
+            "technical": 70,
+            "prior_art_risk": 30
+        }),
         "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
@@ -129,20 +157,24 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
+
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
             if len(idea) < 30:
                 self._error(400, "Idea must be at least 30 characters.")
                 return
+
             if not author:
                 self._error(400, "Author name is required.")
                 return
+
             if not PRIVATE_KEY:
                 self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            self._json(200, run_inference(idea, author))
+            result = run_inference(idea, author)
+            self._json(200, result)
 
         except Exception as e:
             self._error(500, str(e))
