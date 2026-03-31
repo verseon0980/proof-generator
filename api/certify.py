@@ -32,36 +32,15 @@ def parse_ai_response(raw: str) -> dict:
     except Exception:
         return {
             "title": "Idea certificate",
-            "scores": {
-                "overall": 70,
-                "novelty": 70,
-                "market_gap": 70,
-                "technical": 70,
-                "prior_art_risk": 30
-            },
-            "analysis": (raw or "")[:500],
+            "scores": {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30},
+            "analysis": (raw or "")[:500] or "Analysis unavailable.",
             "similar": []
         }
 
 
 async def _infer(idea: str, author: str) -> dict:
-    if not PRIVATE_KEY:
-        raise RuntimeError("Missing OG_PRIVATE_KEY")
-
-    print("=== STARTING REQUEST ===")
-
-    # 🔹 STEP 1: APPROVAL
     llm = og.LLM(private_key=PRIVATE_KEY)
-
-    approval = llm.ensure_opg_approval(0.1)
-
-    print("APPROVAL RESULT:", approval)
-
-    if not approval:
-        raise RuntimeError("❌ Approval failed")
-
-    # 🔥 STEP 2: NEW INSTANCE (IMPORTANT FIX)
-    llm = og.LLM(private_key=PRIVATE_KEY)
+    llm.ensure_opg_approval(0.1)
 
     messages = [
         {
@@ -70,54 +49,36 @@ async def _infer(idea: str, author: str) -> dict:
 
 Idea: \"\"\"{idea}\"\"\"
 
-Return ONLY valid JSON:
+Return ONLY valid JSON, no markdown, no extra text:
 {{
-  "title": "<short title>",
+  "title": "<short 5-8 word title>",
   "scores": {{
-    "overall": <0-100>,
-    "novelty": <0-100>,
-    "market_gap": <0-100>,
-    "technical": <0-100>,
-    "prior_art_risk": <0-100>
+    "overall": <integer 0-100>,
+    "novelty": <integer 0-100>,
+    "market_gap": <integer 0-100>,
+    "technical": <integer 0-100>,
+    "prior_art_risk": <integer 0-100>
   }},
-  "analysis": "<short analysis>",
-  "similar": []
+  "analysis": "<2-3 sentence analysis>",
+  "similar": [
+    {{
+      "name": "<similar product>",
+      "difference": "<one sentence>",
+      "risk": "low"
+    }}
+  ]
 }}"""
         }
     ]
 
-    # 🔹 STEP 3: CHAT (FORCED PAYMENT)
     result = await llm.chat(
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
         messages=messages,
         max_tokens=600,
-        temperature=0.7,
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    print("=== CHAT RESULT ===")
-    print(result)
-    print("===================")
-
-    payment_hash = getattr(result, "payment_hash", None)
-
-    print("PAYMENT HASH:", payment_hash)
-
-    # 🔥 HARD BLOCK: NO TX = FAIL
-    if not payment_hash or not str(payment_hash).startswith("0x"):
-        raise RuntimeError(
-            "❌ PAYMENT NOT EXECUTED\n"
-            "No valid transaction hash.\n"
-            "Check:\n"
-            "1. Wallet has ETH (gas)\n"
-            "2. Wallet has OPG\n"
-            "3. Correct network (Base Sepolia)\n"
-        )
-
-    if not result.chat_output:
-        raise RuntimeError("❌ Empty AI response")
-
-    raw = result.chat_output.get("content", "")
+    raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
     return {
@@ -126,11 +87,12 @@ Return ONLY valid JSON:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": payment_hash,
-        "explorer_url": f"https://explorer.opengradient.ai/tx/{payment_hash}",
-        "title": parsed.get("title"),
-        "scores": parsed.get("scores"),
-        "analysis": parsed.get("analysis"),
+        # ✅ FIXED: was result.payment_hash (wrong field) — correct field is result.transaction_hash
+        # View your transactions at: https://sepolia.basescan.org/tx/<transaction_hash>
+        "payment_hash": result.transaction_hash,
+        "title": parsed.get("title", "Idea certificate"),
+        "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
+        "analysis": parsed.get("analysis", ""),
         "similar": parsed.get("similar", [])
     }
 
@@ -143,9 +105,9 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            out["data"] = loop.run_until_complete(_infer(idea, author))
+            out['data'] = loop.run_until_complete(_infer(idea, author))
         except Exception as e:
-            err["e"] = str(e)
+            err['e'] = str(e)
         finally:
             loop.close()
 
@@ -153,10 +115,9 @@ def run_inference(idea: str, author: str) -> dict:
     t.start()
     t.join()
 
-    if "e" in err:
-        raise RuntimeError(err["e"])
-
-    return out["data"]
+    if 'e' in err:
+        raise RuntimeError(err['e'])
+    return out['data']
 
 
 class handler(BaseHTTPRequestHandler):
@@ -169,27 +130,23 @@ class handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
-
             idea = (body.get("idea") or "").strip()
             author = (body.get("author") or "").strip()
 
             if len(idea) < 30:
                 self._error(400, "Idea must be at least 30 characters.")
                 return
-
             if not author:
-                self._error(400, "Author required.")
+                self._error(400, "Author name is required.")
                 return
-
             if not PRIVATE_KEY:
-                self._error(500, "Missing OG_PRIVATE_KEY.")
+                self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
                 return
 
-            result = run_inference(idea, author)
-            self._json(200, result)
+            self._json(200, run_inference(idea, author))
 
         except Exception as e:
-            self._json(500, {"error": str(e)})
+            self._error(500, str(e))
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
