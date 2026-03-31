@@ -39,7 +39,7 @@ def parse_ai_response(raw: str) -> dict:
                 "technical": 70,
                 "prior_art_risk": 30
             },
-            "analysis": (raw or "")[:500] or "Analysis unavailable.",
+            "analysis": (raw or "")[:500],
             "similar": []
         }
 
@@ -48,10 +48,20 @@ async def _infer(idea: str, author: str) -> dict:
     if not PRIVATE_KEY:
         raise RuntimeError("Missing OG_PRIVATE_KEY")
 
+    print("=== STARTING REQUEST ===")
+
+    # 🔹 STEP 1: APPROVAL
     llm = og.LLM(private_key=PRIVATE_KEY)
 
-    # ✅ Approval (sync in your SDK)
-    llm.ensure_opg_approval(0.1)
+    approval = llm.ensure_opg_approval(0.1)
+
+    print("APPROVAL RESULT:", approval)
+
+    if not approval:
+        raise RuntimeError("❌ Approval failed")
+
+    # 🔥 STEP 2: NEW INSTANCE (IMPORTANT FIX)
+    llm = og.LLM(private_key=PRIVATE_KEY)
 
     messages = [
         {
@@ -62,20 +72,21 @@ Idea: \"\"\"{idea}\"\"\"
 
 Return ONLY valid JSON:
 {{
-  "title": "<short 5-8 word title>",
+  "title": "<short title>",
   "scores": {{
-    "overall": <integer 0-100>,
-    "novelty": <integer 0-100>,
-    "market_gap": <integer 0-100>,
-    "technical": <integer 0-100>,
-    "prior_art_risk": <integer 0-100>
+    "overall": <0-100>,
+    "novelty": <0-100>,
+    "market_gap": <0-100>,
+    "technical": <0-100>,
+    "prior_art_risk": <0-100>
   }},
-  "analysis": "<2-3 sentence analysis>",
+  "analysis": "<short analysis>",
   "similar": []
 }}"""
         }
     ]
 
+    # 🔹 STEP 3: CHAT (FORCED PAYMENT)
     result = await llm.chat(
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
         messages=messages,
@@ -83,25 +94,27 @@ Return ONLY valid JSON:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # 🔥 STRICT ENFORCEMENT
+    print("=== CHAT RESULT ===")
+    print(result)
+    print("===================")
+
     payment_hash = getattr(result, "payment_hash", None)
 
-    print("=== STRICT DEBUG ===")
-    print("payment_hash:", payment_hash)
-    print("full result:", result)
-    print("====================")
+    print("PAYMENT HASH:", payment_hash)
 
-    # ❌ HARD FAIL if no real tx
-    if not payment_hash:
+    # 🔥 HARD BLOCK: NO TX = FAIL
+    if not payment_hash or not str(payment_hash).startswith("0x"):
         raise RuntimeError(
             "❌ PAYMENT NOT EXECUTED\n"
-            "No transaction was created.\n"
-            "Fix: fund wallet / correct network / disable fallback."
+            "No valid transaction hash.\n"
+            "Check:\n"
+            "1. Wallet has ETH (gas)\n"
+            "2. Wallet has OPG\n"
+            "3. Correct network (Base Sepolia)\n"
         )
 
-    # ❌ ALSO FAIL if empty output (safety)
     if not result.chat_output:
-        raise RuntimeError("❌ AI returned empty response")
+        raise RuntimeError("❌ Empty AI response")
 
     raw = result.chat_output.get("content", "")
     parsed = parse_ai_response(raw)
@@ -114,9 +127,9 @@ Return ONLY valid JSON:
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
         "payment_hash": payment_hash,
         "explorer_url": f"https://explorer.opengradient.ai/tx/{payment_hash}",
-        "title": parsed.get("title", "Idea certificate"),
-        "scores": parsed.get("scores", {}),
-        "analysis": parsed.get("analysis", ""),
+        "title": parsed.get("title"),
+        "scores": parsed.get("scores"),
+        "analysis": parsed.get("analysis"),
         "similar": parsed.get("similar", [])
     }
 
@@ -129,9 +142,9 @@ def run_inference(idea: str, author: str) -> dict:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            out['data'] = loop.run_until_complete(_infer(idea, author))
+            out["data"] = loop.run_until_complete(_infer(idea, author))
         except Exception as e:
-            err['e'] = str(e)
+            err["e"] = str(e)
         finally:
             loop.close()
 
@@ -139,9 +152,10 @@ def run_inference(idea: str, author: str) -> dict:
     t.start()
     t.join()
 
-    if 'e' in err:
-        raise RuntimeError(err['e'])
-    return out['data']
+    if "e" in err:
+        raise RuntimeError(err["e"])
+
+    return out["data"]
 
 
 class handler(BaseHTTPRequestHandler):
@@ -163,18 +177,17 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             if not author:
-                self._error(400, "Author name is required.")
+                self._error(400, "Author required.")
                 return
 
             if not PRIVATE_KEY:
-                self._error(500, "Missing OG_PRIVATE_KEY environment variable.")
+                self._error(500, "Missing OG_PRIVATE_KEY.")
                 return
 
             result = run_inference(idea, author)
             self._json(200, result)
 
         except Exception as e:
-            # 🔥 IMPORTANT: return real error
             self._json(500, {"error": str(e)})
 
     def _cors(self):
