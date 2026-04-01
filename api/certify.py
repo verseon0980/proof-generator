@@ -24,7 +24,7 @@ except Exception:
 
 def _basescan_latest_tx(wallet: str) -> str | None:
     url = (
-        f"https://api.basescan.org/v2/api"
+        f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
         f"&module=account&action=tokentx"
         f"&contractaddress={OPG_TOKEN}"
