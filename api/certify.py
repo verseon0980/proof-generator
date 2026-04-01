@@ -40,7 +40,7 @@ def parse_ai_response(raw: str) -> dict:
 
 async def _infer(idea: str, author: str) -> dict:
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    llm.ensure_opg_approval(opg_amount=1.0)
 
     messages = [
         {
@@ -81,12 +81,35 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # Per official PyPI docs: completion.transaction_hash is the Base Sepolia tx hash
-    tx_hash = result.transaction_hash or ""
-    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash and tx_hash != "external" else None
+    # ============================================================
+    # DUMP EVERYTHING — check Vercel function logs after deploying
+    # ============================================================
+    print("=== RESULT TYPE ===", type(result).__name__)
+    try:
+        print("=== RESULT __dict__ ===", result.__dict__)
+    except:
+        pass
+    for attr in dir(result):
+        if attr.startswith("_"):
+            continue
+        try:
+            val = getattr(result, attr)
+            if not callable(val):
+                print(f"  result.{attr} = {repr(val)}")
+        except Exception as e:
+            print(f"  result.{attr} ERROR: {e}")
+    # ============================================================
 
-    print(f"[certify] transaction_hash={repr(tx_hash)}")
-    print(f"[certify] explorer_url={explorer_url}")
+    # Find whichever field has a real 0x... hash
+    tx_hash = ""
+    for field in ["transaction_hash", "payment_hash", "tx_hash", "hash", "receipt_hash", "settlement_hash"]:
+        val = getattr(result, field, None)
+        if val and isinstance(val, str) and val.startswith("0x") and len(val) > 20:
+            tx_hash = val
+            print(f"=== FOUND HASH in result.{field} = {val} ===")
+            break
+
+    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
 
     return {
         "cert_id": generate_cert_id(),
