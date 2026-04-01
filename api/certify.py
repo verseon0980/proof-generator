@@ -24,8 +24,9 @@ except Exception:
 
 def _basescan_latest_tx(wallet: str) -> str | None:
     url = (
-        f"https://api-sepolia.basescan.org/api"
-        f"?module=account&action=tokentx"
+        f"https://api.basescan.org/v2/api"
+        f"?chainid=84532"
+        f"&module=account&action=tokentx"
         f"&contractaddress={OPG_TOKEN}"
         f"&address={wallet}"
         f"&page=1&offset=1&sort=desc"
@@ -101,7 +102,7 @@ async def _infer(idea: str, author: str) -> dict:
 
     # Step 2: run AI inference (this triggers the OPG payment on-chain)
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    llm.ensure_opg_approval(opg_amount=0.1)
 
     result = await llm.chat(
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
@@ -147,7 +148,7 @@ Return ONLY valid JSON, no markdown, no extra text:
     # Step 4: poll Basescan until new tx is confirmed — only then return
     print(f"[certify] inference complete, waiting for Basescan to record tx...")
     tx_hash = poll_for_new_tx(WALLET_ADDRESS, known_tx=known_tx, timeout=90)
-    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+    explorer_url = f"https://base-sepolia.blockscout.com/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] resolved tx_hash={tx_hash!r}")
 
     return {
