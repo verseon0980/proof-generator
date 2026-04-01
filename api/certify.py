@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import re
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
@@ -24,7 +25,7 @@ except Exception:
 
 
 def get_latest_opg_tx(wallet: str) -> str | None:
-    """Fallback: fetch the latest OPG token transfer tx hash from Basescan API."""
+    """Fetch the latest OPG token transfer tx hash from Basescan API."""
     if not wallet:
         return None
     try:
@@ -36,17 +37,17 @@ def get_latest_opg_tx(wallet: str) -> str | None:
             f"&page=1&offset=1&sort=desc"
             f"&apikey={BASESCAN_API_KEY}"
         )
-        with urllib.request.urlopen(url, timeout=8) as resp:
+        print(f"[certify] querying Basescan for wallet {wallet}")
+        with urllib.request.urlopen(url, timeout=10) as resp:
             data = json.loads(resp.read())
+        print(f"[certify] Basescan status={data.get('status')} message={data.get('message')}")
         if data.get("status") == "1" and data.get("result"):
             tx = data["result"][0].get("hash", "")
-            print(f"[certify] fallback Basescan tx: {tx}")
+            print(f"[certify] got tx: {tx}")
             return tx if tx else None
-        else:
-            print(f"[certify] Basescan: {data.get('message')} / {data.get('result')}")
-            return None
+        return None
     except Exception as e:
-        print(f"[certify] Basescan API error: {e}")
+        print(f"[certify] Basescan error: {e}")
         return None
 
 
@@ -77,8 +78,9 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # ── NEW API: og.Client ──────────────────────────────────────────────────
-    client = og.Client(private_key=PRIVATE_KEY)
+    # Exact pattern from official example: og.LLM + llm.chat()
+    llm = og.LLM(private_key=PRIVATE_KEY)
+    llm.ensure_opg_approval(opg_amount=0.1)
 
     messages = [
         {
@@ -109,30 +111,27 @@ Return ONLY valid JSON, no markdown, no extra text:
         }
     ]
 
-    # Use INDIVIDUAL_FULL so the full tx is settled on-chain and visible on Basescan
-    result = await client.llm.chat(
+    result = await llm.chat(
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
         messages=messages,
         max_tokens=600,
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # ── Extract tx hash from result ─────────────────────────────────────────
+    # Debug: log all result fields so we can see what the SDK actually returns
+    print(f"[certify] result type: {type(result)}")
+    print(f"[certify] result attrs: {[a for a in dir(result) if not a.startswith('_')]}")
     raw_tx = getattr(result, "transaction_hash", None)
-    print(f"[certify] completion.transaction_hash = {raw_tx!r}")
+    tee_id = getattr(result, "tee_id", None)
+    print(f"[certify] transaction_hash={raw_tx!r}  tee_id={tee_id!r}")
 
-    # If the SDK gives us a real 0x hash, use it directly
-    if raw_tx and raw_tx not in ("external", "", None) and raw_tx.startswith("0x") and len(raw_tx) >= 60:
-        tx_hash = raw_tx
-        print(f"[certify] using SDK tx hash: {tx_hash}")
-    else:
-        # Fallback: query Basescan for the most recent OPG transfer from our wallet
-        print(f"[certify] SDK hash unusable ({raw_tx!r}), falling back to Basescan")
-        tx_hash = get_latest_opg_tx(WALLET_ADDRESS)
+    # Wait a few seconds for the tx to be indexed on Basescan, then fetch it
+    time.sleep(4)
+    tx_hash = get_latest_opg_tx(WALLET_ADDRESS)
 
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
 
-    # ── Parse LLM response ──────────────────────────────────────────────────
+    # Parse LLM content
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
