@@ -40,7 +40,7 @@ def parse_ai_response(raw: str) -> dict:
 
 async def _infer(idea: str, author: str) -> dict:
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    llm.ensure_opg_approval(opg_amount=1.0)
 
     messages = [
         {
@@ -81,11 +81,12 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # On opengradient==0.8.0, result.payment_hash returns the real Base Sepolia tx hash
-    payment_hash = result.payment_hash or ""
-    print(f"[certify] payment_hash: {repr(payment_hash)}")
+    # Per official PyPI docs: completion.transaction_hash is the Base Sepolia tx hash
+    tx_hash = result.transaction_hash or ""
+    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash and tx_hash != "external" else None
 
-    explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
+    print(f"[certify] transaction_hash={repr(tx_hash)}")
+    print(f"[certify] explorer_url={explorer_url}")
 
     return {
         "cert_id": generate_cert_id(),
@@ -93,7 +94,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "payment_hash": payment_hash,
+        "transaction_hash": tx_hash,
         "explorer_url": explorer_url,
         "title": parsed.get("title", "Idea certificate"),
         "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
