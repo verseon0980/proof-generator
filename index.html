@@ -283,24 +283,10 @@
       <div class="section-title">Similar things that already exist</div>
       <div id="similarList"></div>
 
-      <!-- PROOF: timestamp + idea fingerprint only (no cert ID, no payment hash) -->
-      <div class="divider"></div>
-      <div class="section-title">On-chain proof</div>
-      <div class="proof-row">
-        <div class="proof-item">
-          <div class="proof-key">Timestamp</div>
-          <div class="proof-val" id="proofTime"></div>
-        </div>
-        <div class="proof-item">
-          <div class="proof-key">Idea fingerprint</div>
-          <div class="proof-val accent" id="proofHash"></div>
-        </div>
-      </div>
-
-      <!-- Watermark — visible on screen and in PNG download -->
+      <!-- Watermark at bottom of cert card -->
       <div class="cert-watermark">
         <span class="wm-brand">Proof Generator · OpenGradient TEE</span>
-        <span class="wm-hash" id="wmHash"></span>
+        <span class="wm-date" id="wmDate"></span>
       </div>
     </div>
     <!-- ↑ end cert-card -->
@@ -402,21 +388,31 @@ function renderCertificate(data) {
   document.getElementById('certIdeaText').textContent = data.idea;
   document.getElementById('analysisText').textContent = data.analysis;
 
-  // Proof section — timestamp + truncated fingerprint
-  document.getElementById('proofTime').textContent = data.timestamp;
-  document.getElementById('proofHash').textContent = data.idea_hash ? data.idea_hash.slice(0, 22) + '...' : 'N/A';
-  document.getElementById('wmHash').textContent = data.idea_hash ? data.idea_hash.slice(0, 28) + '...' : '';
+  // Watermark date
+  document.getElementById('wmDate').textContent = data.timestamp;
 
-  // Basescan button — use explorer_url from API (already Base Sepolia)
+  // Debug: log full API response so you can inspect payment_hash in browser console
+  console.log('[Proof Generator] API response:', JSON.stringify(data, null, 2));
+
+  // Basescan button
+  // explorer_url is already built server-side as sepolia.basescan.org/tx/<payment_hash>
   const basescanBtn = document.getElementById('basescanBtn');
   const basescanUrl = data.explorer_url || (data.payment_hash ? 'https://sepolia.basescan.org/tx/' + data.payment_hash : null);
-  if (basescanUrl) {
+  console.log('[Proof Generator] payment_hash:', data.payment_hash);
+  console.log('[Proof Generator] explorer_url:', data.explorer_url);
+  console.log('[Proof Generator] basescanUrl resolved to:', basescanUrl);
+
+  if (basescanUrl && data.payment_hash) {
     basescanBtn.href = basescanUrl;
-    basescanBtn.removeAttribute('disabled');
+    basescanBtn.style.opacity = '1';
+    basescanBtn.style.pointerEvents = 'auto';
+    basescanBtn.title = '';
   } else {
     basescanBtn.href = '#';
-    basescanBtn.setAttribute('disabled', '');
-    basescanBtn.title = 'Transaction hash unavailable';
+    basescanBtn.style.opacity = '0.4';
+    basescanBtn.style.pointerEvents = 'none';
+    basescanBtn.title = 'No transaction hash returned by API — check server logs';
+    console.warn('[Proof Generator] No payment_hash in response. Basescan link disabled.');
   }
 
   // Score animation
