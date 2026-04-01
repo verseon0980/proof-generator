@@ -85,6 +85,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .loading-text { color: var(--muted); font-size: 0.9rem; }
   .loading-step { color: var(--accent); font-size: 0.85rem; margin-top: 6px; font-family: 'DM Mono', monospace; }
+  .loading-note { color: var(--muted); font-size: 0.75rem; margin-top: 10px; opacity: 0.7; }
 
   /* ERROR */
   .error-box { display: none; background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3); border-radius: 10px; padding: 14px 16px; font-size: 0.88rem; color: var(--danger); margin-bottom: 1rem; }
@@ -94,7 +95,6 @@
   .cert { display: none; }
   .cert.active { display: block; }
 
-  /* The cert-card is what gets captured as PNG */
   .cert-card {
     background: var(--bg2);
     border: 1px solid var(--border2);
@@ -145,16 +145,10 @@
   .sim-title { font-size: 0.88rem; font-weight: 500; color: var(--text); margin-bottom: 3px; }
   .sim-why { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
 
-  /* PROOF — simplified: only timestamp + idea fingerprint */
   .divider { height: 1px; background: var(--border); margin: 1.5rem 0; }
   .section-title { font-family: 'Syne', sans-serif; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; }
-  .proof-row { display: flex; gap: 10px; }
-  .proof-item { background: var(--bg3); border-radius: 8px; padding: 10px 14px; flex: 1; }
-  .proof-key { font-size: 0.72rem; color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .proof-val { font-family: 'DM Mono', monospace; font-size: 0.8rem; color: var(--text); word-break: break-all; }
-  .proof-val.accent { color: var(--accent); }
 
-  /* Watermark inside cert card, shown in PNG too */
+  /* Watermark */
   .cert-watermark {
     margin-top: 1.5rem;
     padding-top: 1rem;
@@ -167,9 +161,8 @@
     font-family: 'DM Mono', monospace;
   }
   .wm-brand { color: var(--accent); font-weight: 600; font-family: 'Syne', sans-serif; letter-spacing: 0.04em; font-size: 0.75rem; }
-  .wm-hash { opacity: 0.55; font-size: 0.67rem; }
 
-  /* TWO ACTION BUTTONS */
+  /* ACTION BUTTONS */
   .action-row { display: flex; gap: 10px; margin-top: 0; }
   .action-btn {
     flex: 1; padding: 12px 10px;
@@ -187,9 +180,7 @@
   .action-btn:hover { border-color: var(--border2); color: var(--text); }
   .action-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
   .action-btn.primary:hover { background: var(--accent2); border-color: var(--accent2); }
-  .action-btn.primary:disabled { background: var(--bg3); border-color: var(--border); color: var(--muted); cursor: not-allowed; }
   .action-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
-  .action-btn[disabled] { opacity: 0.45; pointer-events: none; }
 
   .tee-pill { display: inline-flex; align-items: center; gap: 6px; background: rgba(62,207,178,0.08); border: 1px solid var(--border2); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; color: var(--accent); margin-bottom: 1.5rem; }
   .tee-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
@@ -199,7 +190,6 @@
   .new-btn:hover { border-color: var(--border2); color: var(--text); }
 
   @media(max-width:500px) {
-    .proof-row { flex-direction: column; }
     .action-row { flex-direction: column; }
     .cert-header { flex-direction: column; }
   }
@@ -231,8 +221,9 @@
   <!-- LOADING -->
   <div class="loading" id="loadingSection">
     <div class="spinner"></div>
-    <div class="loading-text">Analyzing your idea...</div>
+    <div class="loading-text">Generating your certificate...</div>
     <div class="loading-step" id="loadingStep">Connecting to OpenGradient TEE</div>
+    <div class="loading-note" id="loadingNote">This may take up to 60s while the transaction confirms on-chain</div>
   </div>
 
   <!-- CERTIFICATE -->
@@ -242,7 +233,6 @@
       TEE-attested via OpenGradient x402
     </div>
 
-    <!-- ↓ This entire card is captured when downloading PNG -->
     <div class="cert-card" id="certCard">
       <div class="cert-header">
         <div class="cert-title-wrap">
@@ -254,7 +244,6 @@
 
       <div class="idea-text" id="certIdeaText"></div>
 
-      <!-- SCORE -->
       <div class="score-row">
         <div class="score-circle">
           <svg width="80" height="80" viewBox="0 0 80 80">
@@ -274,24 +263,19 @@
         </div>
       </div>
 
-      <!-- ANALYSIS -->
       <div class="analysis-label">AI analysis</div>
       <div class="analysis-box" id="analysisText"></div>
 
-      <!-- SIMILAR -->
       <div class="divider"></div>
       <div class="section-title">Similar things that already exist</div>
       <div id="similarList"></div>
 
-      <!-- Watermark at bottom of cert card -->
       <div class="cert-watermark">
         <span class="wm-brand">Proof Generator · OpenGradient TEE</span>
-        <span class="wm-date" id="wmDate"></span>
+        <span id="wmDate"></span>
       </div>
     </div>
-    <!-- ↑ end cert-card -->
 
-    <!-- TWO BUTTONS ONLY: Basescan + Download PNG -->
     <div class="action-row">
       <a class="action-btn" id="basescanBtn" href="#" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 010 20"/><path d="M12 2a15.3 15.3 0 000 20"/></svg>
@@ -312,13 +296,47 @@ const STEPS = [
   "Connecting to OpenGradient TEE",
   "x402 payment authorized",
   "Running verifiable inference",
-  "Searching for prior art online",
-  "Generating originality analysis",
-  "Sealing fingerprint on-chain",
+  "Analyzing originality & prior art",
+  "Waiting for on-chain confirmation",
+  "Transaction confirmed on Base Sepolia",
   "Certificate ready"
 ];
 
+// Step timing: steps 0-3 advance every 3s (fast, during inference ~15s)
+// Step 4 stays until we're close to done (polling phase)
+// Steps 5-6 advance at the end
+const STEP_DELAYS = [3000, 3000, 3000, 3000, 99999, 1200, 800];
+
 let currentResult = null;
+let stepTimer = null;
+
+function startSteps() {
+  let idx = 0;
+  const stepEl = document.getElementById('loadingStep');
+  stepEl.textContent = STEPS[0];
+
+  function advance() {
+    if (idx < STEPS.length - 1) {
+      idx++;
+      stepEl.textContent = STEPS[idx];
+      if (idx < STEPS.length - 1) {
+        stepTimer = setTimeout(advance, STEP_DELAYS[idx]);
+      }
+    }
+  }
+  stepTimer = setTimeout(advance, STEP_DELAYS[0]);
+}
+
+function finishSteps(callback) {
+  // Jump to step 5 "Transaction confirmed" then "Certificate ready"
+  clearTimeout(stepTimer);
+  const stepEl = document.getElementById('loadingStep');
+  stepEl.textContent = STEPS[5];
+  setTimeout(() => {
+    stepEl.textContent = STEPS[6];
+    setTimeout(callback, 600);
+  }, 1200);
+}
 
 async function submitIdea() {
   const idea = document.getElementById('ideaText').value.trim();
@@ -342,14 +360,7 @@ async function submitIdea() {
   document.getElementById('loadingSection').classList.add('active');
   document.getElementById('certSection').classList.remove('active');
 
-  let stepIdx = 0;
-  const stepEl = document.getElementById('loadingStep');
-  const stepInterval = setInterval(() => {
-    if (stepIdx < STEPS.length - 1) {
-      stepIdx++;
-      stepEl.textContent = STEPS[stepIdx];
-    }
-  }, 2200);
+  startSteps();
 
   try {
     const res = await fetch('/api/certify', {
@@ -358,8 +369,6 @@ async function submitIdea() {
       body: JSON.stringify({ idea, author })
     });
 
-    clearInterval(stepInterval);
-
     if (!res.ok) {
       const data = await res.json();
       throw new Error(data.error || 'Something went wrong. Please try again.');
@@ -367,10 +376,14 @@ async function submitIdea() {
 
     const data = await res.json();
     currentResult = data;
-    renderCertificate(data);
+
+    // API returned — animate final steps then render
+    finishSteps(() => {
+      renderCertificate(data);
+    });
 
   } catch (err) {
-    clearInterval(stepInterval);
+    clearTimeout(stepTimer);
     document.getElementById('loadingSection').classList.remove('active');
     document.getElementById('formSection').style.display = 'block';
     errBox.textContent = err.message;
@@ -381,25 +394,25 @@ async function submitIdea() {
 function renderCertificate(data) {
   document.getElementById('loadingSection').classList.remove('active');
 
-  // Header — no cert ID
   document.getElementById('certTitle').textContent = data.title;
   document.getElementById('certBy').textContent = 'By ' + data.author + ' · ' + data.timestamp;
   document.getElementById('certScore').textContent = 'Originality ' + data.scores.overall + ' / 100';
   document.getElementById('certIdeaText').textContent = data.idea;
   document.getElementById('analysisText').textContent = data.analysis;
-
-  // Watermark date
   document.getElementById('wmDate').textContent = data.timestamp;
 
-  // Basescan — links to the exact tx on Base Sepolia
+  // Basescan button — only link if we have a real tx
   const basescanBtn = document.getElementById('basescanBtn');
   if (data.explorer_url) {
     basescanBtn.href = data.explorer_url;
     basescanBtn.style.opacity = '1';
     basescanBtn.style.pointerEvents = 'auto';
+  } else {
+    basescanBtn.style.opacity = '0.35';
+    basescanBtn.style.pointerEvents = 'none';
+    basescanBtn.title = 'Transaction not yet indexed';
   }
 
-  // Score animation
   setTimeout(() => {
     const s = data.scores;
     document.getElementById('scoreNum').textContent = s.overall;
@@ -411,7 +424,6 @@ function renderCertificate(data) {
     setBar('bar4', 'bv4', s.prior_art_risk, true);
   }, 100);
 
-  // Similar items
   const list = document.getElementById('similarList');
   list.innerHTML = '';
   (data.similar || []).forEach(item => {
@@ -431,10 +443,7 @@ function renderCertificate(data) {
 function setBar(barId, valId, val, invert) {
   document.getElementById(barId).style.width = val + '%';
   document.getElementById(valId).textContent = val;
-  if (invert && val < 30) {
-    document.getElementById(valId).style.color = '#3ECFB2';
-    document.getElementById(barId).style.background = '#3ECFB2';
-  } else if (invert && val > 60) {
+  if (invert && val > 60) {
     document.getElementById(valId).style.color = '#ff6b6b';
     document.getElementById(barId).style.background = '#ff6b6b';
   }
@@ -444,7 +453,7 @@ async function downloadPNG() {
   const btn = document.getElementById('downloadBtn');
   const origHTML = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Generating...`;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Generating...`;
 
   try {
     const card = document.getElementById('certCard');
@@ -456,15 +465,12 @@ async function downloadPNG() {
       scrollX: 0,
       scrollY: -window.scrollY
     });
-
     const link = document.createElement('a');
-    const slug = (currentResult?.title || 'certificate')
-      .replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40);
+    const slug = (currentResult?.title || 'certificate').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40);
     link.download = `proof-${slug}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   } catch (e) {
-    console.error('PNG export failed:', e);
     alert('Could not generate PNG. Please try again.');
   }
 
