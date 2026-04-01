@@ -139,6 +139,17 @@ Return ONLY valid JSON, no markdown, no extra text:
 
     print(f"[certify] inference done, polling for tx after ts={before_ts}...")
     tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=45)
+
+    if not tx_hash:
+        print(f"[certify] polling timed out, fetching latest tx as fallback...")
+        try:
+            tx_data = _fetch_latest_tx_data(WALLET_ADDRESS)
+            if tx_data:
+                tx_hash = tx_data.get("hash", "")
+                print(f"[certify] fallback tx_hash={tx_hash!r}")
+        except Exception as e:
+            print(f"[certify] fallback fetch error: {e}")
+
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
 
