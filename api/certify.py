@@ -15,18 +15,21 @@ from eth_account import Account
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
 OPG_TOKEN = "0x240b09731D96979f50B2C649C9CE10FcF9C7987F"
+WALLET_ADDRESS = None
 
 try:
     WALLET_ADDRESS = Account.from_key(PRIVATE_KEY).address if PRIVATE_KEY else None
 except Exception:
-    WALLET_ADDRESS = None
+    pass
 
 
-def _basescan_latest_tx(wallet: str) -> str | None:
+def _fetch_latest_tx(wallet: str) -> str | None:
+    """Hit Etherscan V2 API for latest OPG token transfer from wallet."""
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
-        f"&module=account&action=tokentx"
+        f"&module=account"
+        f"&action=tokentx"
         f"&contractaddress={OPG_TOKEN}"
         f"&address={wallet}"
         f"&page=1&offset=1&sort=desc"
@@ -40,27 +43,24 @@ def _basescan_latest_tx(wallet: str) -> str | None:
 
 
 def snapshot_tx(wallet: str) -> str | None:
-    """Get current latest tx before inference runs."""
     try:
-        return _basescan_latest_tx(wallet)
+        return _fetch_latest_tx(wallet)
     except Exception as e:
         print(f"[certify] snapshot error: {e}")
         return None
 
 
 def poll_for_new_tx(wallet: str, known_tx: str | None, timeout: int = 90) -> str | None:
-    """
-    Poll Basescan every 5s until a tx appears that differs from known_tx.
-    Returns the new tx hash or None on timeout.
-    """
+    """Poll every 5s until a tx different from known_tx appears."""
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         try:
-            tx = _basescan_latest_tx(wallet)
+            tx = _fetch_latest_tx(wallet)
             print(f"[certify] poll #{attempt}: got={tx!r} known={known_tx!r}")
             if tx and tx != known_tx:
+                print(f"[certify] new tx found: {tx}")
                 return tx
         except Exception as e:
             print(f"[certify] poll #{attempt} error: {e}")
@@ -96,11 +96,11 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # Step 1: snapshot latest tx BEFORE paying/inferring
+    # 1. Snapshot latest tx before inference
     known_tx = snapshot_tx(WALLET_ADDRESS)
-    print(f"[certify] pre-inference snapshot: {known_tx!r}")
+    print(f"[certify] snapshot before inference: {known_tx!r}")
 
-    # Step 2: run AI inference (this triggers the OPG payment on-chain)
+    # 2. Run inference — exact pattern from official example
     llm = og.LLM(private_key=PRIVATE_KEY)
     llm.ensure_opg_approval(0.1)
 
@@ -136,7 +136,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Step 3: parse AI output immediately (no waiting)
+    # 3. Parse AI output
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
@@ -145,11 +145,11 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # Step 4: poll Basescan until new tx is confirmed — only then return
-    print(f"[certify] inference complete, waiting for Basescan to record tx...")
+    # 4. Poll until new tx is confirmed on-chain
+    print(f"[certify] inference done, polling for new tx...")
     tx_hash = poll_for_new_tx(WALLET_ADDRESS, known_tx=known_tx, timeout=90)
-    explorer_url = f"https://base-sepolia.blockscout.com/tx/{tx_hash}" if tx_hash else None
-    print(f"[certify] resolved tx_hash={tx_hash!r}")
+    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+    print(f"[certify] final explorer_url={explorer_url!r}")
 
     return {
         "cert_id": generate_cert_id(),
