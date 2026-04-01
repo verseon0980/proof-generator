@@ -81,16 +81,32 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # result.transaction_hash returns "external" for x402/LLM — do NOT use it
-    # result.payment_hash is the real Base Sepolia tx hash
-    payment_hash = result.payment_hash or ""
-    explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
+    # Dump every attribute on the result object so we can find the real hash
+    print("[certify] result type:", type(result))
+    print("[certify] result dir:", [a for a in dir(result) if not a.startswith("__")])
+    try:
+        print("[certify] result.__dict__:", result.__dict__)
+    except Exception as e:
+        print("[certify] result.__dict__ error:", e)
+    print("[certify] payment_hash:", repr(getattr(result, 'payment_hash', 'ATTR_MISSING')))
+    print("[certify] transaction_hash:", repr(getattr(result, 'transaction_hash', 'ATTR_MISSING')))
+    print("[certify] tx_hash:", repr(getattr(result, 'tx_hash', 'ATTR_MISSING')))
+    print("[certify] receipt:", repr(getattr(result, 'receipt', 'ATTR_MISSING')))
+    print("[certify] x402_receipt:", repr(getattr(result, 'x402_receipt', 'ATTR_MISSING')))
 
-    # Server-side debug log — visible in Vercel function logs
-    print(f"[certify] payment_hash raw: {repr(result.payment_hash)}")
-    print(f"[certify] transaction_hash raw: {repr(result.transaction_hash)}")
-    print(f"[certify] explorer_url: {explorer_url}")
-    print(f"[certify] chat_output keys: {list(result.chat_output.keys()) if result.chat_output else 'None'}")
+    # Use whichever field actually has a real 0x hash
+    payment_hash = ""
+    for field in ['payment_hash', 'transaction_hash', 'tx_hash']:
+        val = getattr(result, field, None)
+        if val and isinstance(val, str) and val.startswith("0x") and len(val) > 10:
+            payment_hash = val
+            print(f"[certify] Using field '{field}' = {val}")
+            break
+
+    if not payment_hash:
+        print("[certify] WARNING: no valid 0x hash found in result object")
+
+    explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
 
     return {
         "cert_id": generate_cert_id(),
