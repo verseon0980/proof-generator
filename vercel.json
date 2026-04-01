@@ -1,11 +1,15 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/certify.py", "use": "@vercel/python" },
+    { 
+      "src": "api/certify.py", 
+      "use": "@vercel/python",
+      "config": { "maxDuration": 60 }
+    },
     { "src": "index.html", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/certify", "dest": "api/certify.py" },
     { "src": "/", "dest": "index.html" }
   ]
-} 
+}
