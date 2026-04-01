@@ -391,12 +391,13 @@ function renderCertificate(data) {
   // Watermark date
   document.getElementById('wmDate').textContent = data.timestamp;
 
-
-  // Basescan button always works — links to wallet address on Base Sepolia
+  // Basescan — links to the exact tx on Base Sepolia
   const basescanBtn = document.getElementById('basescanBtn');
-  basescanBtn.href = data.explorer_url || 'https://sepolia.basescan.org';
-  basescanBtn.style.opacity = '1';
-  basescanBtn.style.pointerEvents = 'auto';
+  if (data.explorer_url) {
+    basescanBtn.href = data.explorer_url;
+    basescanBtn.style.opacity = '1';
+    basescanBtn.style.pointerEvents = 'auto';
+  }
 
   // Score animation
   setTimeout(() => {
