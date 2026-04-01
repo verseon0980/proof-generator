@@ -81,11 +81,8 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # IMPORTANT:
-    # result.transaction_hash returns the string "external" for x402/LLM calls — do NOT use it.
-    # result.payment_hash is the correct field — it contains the real Base Sepolia tx hash.
-    # View your transactions at: https://sepolia.basescan.org/tx/<payment_hash>
-    # Do NOT use explorer.opengradient.ai — that is only for Alpha Testnet ML workflows.
+    # result.transaction_hash returns "external" for x402/LLM — do NOT use it
+    # result.payment_hash is the real Base Sepolia tx hash
     payment_hash = result.payment_hash or ""
     explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
 
