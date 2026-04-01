@@ -6,18 +6,72 @@ import datetime
 import re
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
 from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
+BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
+OPG_TOKEN = "0x240b09731D96979f50B2C649C9CE10FcF9C7987F"
 WALLET_ADDRESS = None
 
 try:
     WALLET_ADDRESS = Account.from_key(PRIVATE_KEY).address if PRIVATE_KEY else None
 except Exception:
     pass
+
+
+def fetch_tx_by_timestamp(wallet: str, tee_address: str, tee_timestamp: int) -> str | None:
+    """
+    Fetch the tx hash by finding a token transfer from wallet to tee_address
+    at or near tee_timestamp. We fetch last 10 txs and match by 'to' address
+    and timestamp window.
+    """
+    url = (
+        f"https://api.etherscan.io/v2/api"
+        f"?chainid=84532"
+        f"&module=account"
+        f"&action=tokentx"
+        f"&contractaddress={OPG_TOKEN}"
+        f"&address={wallet}"
+        f"&page=1&offset=10&sort=desc"
+        f"&apikey={BASESCAN_API_KEY}"
+    )
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        data = json.loads(resp.read())
+
+    if data.get("status") != "1" or not data.get("result"):
+        return None
+
+    tee_addr_lower = tee_address.lower()
+    for tx in data["result"]:
+        tx_ts = int(tx.get("timeStamp", 0))
+        tx_to = tx.get("to", "").lower()
+        # Match: sent to tee_payment_address within 120s window of tee_timestamp
+        if tx_to == tee_addr_lower and abs(tx_ts - tee_timestamp) <= 120:
+            return tx.get("hash")
+
+    return None
+
+
+def poll_for_tx(wallet: str, tee_address: str, tee_timestamp: int, timeout: int = 45) -> str | None:
+    """Poll until tx appears matching tee_address and tee_timestamp."""
+    deadline = time.time() + timeout
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            tx_hash = fetch_tx_by_timestamp(wallet, tee_address, tee_timestamp)
+            print(f"[certify] poll #{attempt}: tx_hash={tx_hash!r}")
+            if tx_hash:
+                return tx_hash
+        except Exception as e:
+            print(f"[certify] poll #{attempt} error: {e}")
+        time.sleep(3)
+    print(f"[certify] timed out after {timeout}s")
+    return None
 
 
 def generate_cert_id():
@@ -82,27 +136,10 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # ── DEBUG: dump everything on result ──────────────────────────
-    print(f"[DEBUG] result type: {type(result)}")
-    try:
-        print(f"[DEBUG] result __dict__: {vars(result)}")
-    except Exception as e:
-        print(f"[DEBUG] vars() failed: {e}")
-    if isinstance(result, dict):
-        print(f"[DEBUG] result keys: {list(result.keys())}")
-        print(f"[DEBUG] result full: {json.dumps(result, default=str)}")
-    for field in [
-        "transaction_hash", "payment_hash", "tx_hash",
-        "receipt", "payment_receipt", "x402_receipt",
-        "headers", "settlement_hash", "settlement",
-        "chat_output", "model", "id", "choices",
-    ]:
-        try:
-            val = result.get(field) if isinstance(result, dict) else getattr(result, field, "NOT_FOUND")
-            print(f"[DEBUG] result.{field} = {val!r}")
-        except Exception as e:
-            print(f"[DEBUG] result.{field} error: {e}")
-    # ── END DEBUG ─────────────────────────────────────────────────
+    # Extract tee_payment_address and tee_timestamp directly from SDK result
+    tee_address = getattr(result, "tee_payment_address", None)
+    tee_timestamp = getattr(result, "tee_timestamp", None)
+    print(f"[certify] tee_payment_address={tee_address!r} tee_timestamp={tee_timestamp!r}")
 
     # Get AI output
     raw_content = ""
@@ -113,13 +150,13 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # Placeholder until we find the real field from logs
-    tx_hash = getattr(result, "transaction_hash", None)
-    if isinstance(result, dict):
-        tx_hash = result.get("transaction_hash")
-    print(f"[DEBUG] tx_hash used: {tx_hash!r}")
+    # Poll Basescan for the tx matching tee_address + tee_timestamp
+    tx_hash = None
+    if tee_address and tee_timestamp and WALLET_ADDRESS:
+        tx_hash = poll_for_tx(WALLET_ADDRESS, tee_address, int(tee_timestamp), timeout=45)
 
-    explorer_url = f"https://explorer.opengradient.ai/tx/{tx_hash}" if tx_hash else None
+    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+    print(f"[certify] final explorer_url={explorer_url!r}")
 
     return {
         "cert_id": generate_cert_id(),
