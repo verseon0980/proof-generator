@@ -82,14 +82,27 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Get tx hash directly from SDK — this is the official way per OpenGradient docs
-    tx_hash = None
+    # ── DEBUG: dump everything on result ──────────────────────────
+    print(f"[DEBUG] result type: {type(result)}")
+    try:
+        print(f"[DEBUG] result __dict__: {vars(result)}")
+    except Exception as e:
+        print(f"[DEBUG] vars() failed: {e}")
     if isinstance(result, dict):
-        tx_hash = result.get("transaction_hash")
-    else:
-        tx_hash = getattr(result, "transaction_hash", None)
-
-    print(f"[certify] transaction_hash from SDK: {tx_hash!r}")
+        print(f"[DEBUG] result keys: {list(result.keys())}")
+        print(f"[DEBUG] result full: {json.dumps(result, default=str)}")
+    for field in [
+        "transaction_hash", "payment_hash", "tx_hash",
+        "receipt", "payment_receipt", "x402_receipt",
+        "headers", "settlement_hash", "settlement",
+        "chat_output", "model", "id", "choices",
+    ]:
+        try:
+            val = result.get(field) if isinstance(result, dict) else getattr(result, field, "NOT_FOUND")
+            print(f"[DEBUG] result.{field} = {val!r}")
+        except Exception as e:
+            print(f"[DEBUG] result.{field} error: {e}")
+    # ── END DEBUG ─────────────────────────────────────────────────
 
     # Get AI output
     raw_content = ""
@@ -100,9 +113,13 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # Use OpenGradient's own explorer, not Basescan
+    # Placeholder until we find the real field from logs
+    tx_hash = getattr(result, "transaction_hash", None)
+    if isinstance(result, dict):
+        tx_hash = result.get("transaction_hash")
+    print(f"[DEBUG] tx_hash used: {tx_hash!r}")
+
     explorer_url = f"https://explorer.opengradient.ai/tx/{tx_hash}" if tx_hash else None
-    print(f"[certify] explorer_url={explorer_url!r}")
 
     return {
         "cert_id": generate_cert_id(),
