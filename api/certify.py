@@ -138,8 +138,7 @@ Return ONLY valid JSON, no markdown, no extra text:
     parsed = parse_ai_response(raw_content)
 
     print(f"[certify] inference done, polling for tx after ts={before_ts}...")
-    tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=45)
-
+    tx_hash = ""
     if not tx_hash:
         print(f"[certify] polling timed out, fetching latest tx as fallback...")
         try:
