@@ -24,7 +24,6 @@ except Exception:
 
 
 def fetch_recent_txs(wallet: str) -> list:
-    """Fetch last 10 token txs from Basescan."""
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
@@ -42,12 +41,7 @@ def fetch_recent_txs(wallet: str) -> list:
     return []
 
 
-def poll_for_tx(wallet: str, tee_timestamp: int, old_hash: str | None, timeout: int = 45) -> str | None:
-    """
-    Poll until we find a tx that:
-    1. Has a different hash from old_hash (it's new)
-    2. Has timeStamp within 180s of tee_timestamp
-    """
+def poll_for_tx(wallet: str, tee_timestamp: int, old_hash: str | None, timeout: int = 55) -> str | None:
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
@@ -57,9 +51,9 @@ def poll_for_tx(wallet: str, tee_timestamp: int, old_hash: str | None, timeout: 
             for tx in txs:
                 tx_ts = int(tx.get("timeStamp", 0))
                 tx_h = tx.get("hash", "")
-                # New tx within 180s window of tee_timestamp
-                if tx_h and tx_h != old_hash and abs(tx_ts - tee_timestamp) <= 180:
-                    print(f"[certify] poll #{attempt}: FOUND tx_hash={tx_h!r} tx_ts={tx_ts} tee_ts={tee_timestamp}")
+                # New tx within 300s window of tee_timestamp
+                if tx_h and tx_h != old_hash and abs(tx_ts - tee_timestamp) <= 300:
+                    print(f"[certify] poll #{attempt}: FOUND tx_hash={tx_h!r} tx_ts={tx_ts} tee_ts={tee_timestamp} diff={tx_ts - tee_timestamp}s")
                     return tx_h
             print(f"[certify] poll #{attempt}: no match yet (tee_ts={tee_timestamp})")
         except Exception as e:
@@ -141,11 +135,9 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Get exact tee_timestamp from SDK — much more precise than our before_ts
     tee_timestamp = getattr(result, "tee_timestamp", None)
     print(f"[certify] tee_timestamp={tee_timestamp!r} old_hash={old_hash!r}")
 
-    # Get AI output
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
@@ -154,10 +146,9 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # Poll using exact tee_timestamp + old_hash to uniquely identify this tx
     tx_hash = None
     if tee_timestamp and WALLET_ADDRESS:
-        tx_hash = poll_for_tx(WALLET_ADDRESS, int(tee_timestamp), old_hash, timeout=45)
+        tx_hash = poll_for_tx(WALLET_ADDRESS, int(tee_timestamp), old_hash, timeout=55)
 
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
@@ -193,7 +184,7 @@ def run_inference(idea: str, author: str) -> dict:
 
     t = threading.Thread(target=target)
     t.start()
-    t.join(timeout=55)
+    t.join(timeout=58)
 
     if t.is_alive():
         raise RuntimeError("Timed out waiting for inference.")
