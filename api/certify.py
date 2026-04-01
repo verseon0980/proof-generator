@@ -14,8 +14,6 @@ from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
 BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
-
-# OPG token contract on Base Sepolia
 OPG_TOKEN = "0x240b09731D96979f50B2C649C9CE10FcF9C7987F"
 
 try:
@@ -24,31 +22,50 @@ except Exception:
     WALLET_ADDRESS = None
 
 
-def get_latest_opg_tx(wallet: str) -> str | None:
-    """Fetch the latest OPG token transfer tx hash from Basescan API."""
-    if not wallet:
-        return None
+def _basescan_latest_tx(wallet: str) -> str | None:
+    url = (
+        f"https://api-sepolia.basescan.org/api"
+        f"?module=account&action=tokentx"
+        f"&contractaddress={OPG_TOKEN}"
+        f"&address={wallet}"
+        f"&page=1&offset=1&sort=desc"
+        f"&apikey={BASESCAN_API_KEY}"
+    )
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        data = json.loads(resp.read())
+    if data.get("status") == "1" and data.get("result"):
+        return data["result"][0].get("hash") or None
+    return None
+
+
+def snapshot_tx(wallet: str) -> str | None:
+    """Get current latest tx before inference runs."""
     try:
-        url = (
-            f"https://api-sepolia.basescan.org/api"
-            f"?module=account&action=tokentx"
-            f"&contractaddress={OPG_TOKEN}"
-            f"&address={wallet}"
-            f"&page=1&offset=1&sort=desc"
-            f"&apikey={BASESCAN_API_KEY}"
-        )
-        print(f"[certify] querying Basescan for wallet {wallet}")
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = json.loads(resp.read())
-        print(f"[certify] Basescan status={data.get('status')} message={data.get('message')}")
-        if data.get("status") == "1" and data.get("result"):
-            tx = data["result"][0].get("hash", "")
-            print(f"[certify] got tx: {tx}")
-            return tx if tx else None
-        return None
+        return _basescan_latest_tx(wallet)
     except Exception as e:
-        print(f"[certify] Basescan error: {e}")
+        print(f"[certify] snapshot error: {e}")
         return None
+
+
+def poll_for_new_tx(wallet: str, known_tx: str | None, timeout: int = 90) -> str | None:
+    """
+    Poll Basescan every 5s until a tx appears that differs from known_tx.
+    Returns the new tx hash or None on timeout.
+    """
+    deadline = time.time() + timeout
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            tx = _basescan_latest_tx(wallet)
+            print(f"[certify] poll #{attempt}: got={tx!r} known={known_tx!r}")
+            if tx and tx != known_tx:
+                return tx
+        except Exception as e:
+            print(f"[certify] poll #{attempt} error: {e}")
+        time.sleep(5)
+    print(f"[certify] timed out after {timeout}s")
+    return None
 
 
 def generate_cert_id():
@@ -78,12 +95,17 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # Exact pattern from official example: og.LLM + llm.chat()
-    llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    # Step 1: snapshot latest tx BEFORE paying/inferring
+    known_tx = snapshot_tx(WALLET_ADDRESS)
+    print(f"[certify] pre-inference snapshot: {known_tx!r}")
 
-    messages = [
-        {
+    # Step 2: run AI inference (this triggers the OPG payment on-chain)
+    llm = og.LLM(private_key=PRIVATE_KEY)
+    llm.ensure_opg_approval(opg_amount=0.1)
+
+    result = await llm.chat(
+        model=og.TEE_LLM.GEMINI_2_5_FLASH,
+        messages=[{
             "role": "user",
             "content": f"""You are an AI that evaluates the originality of ideas.
 
@@ -108,38 +130,25 @@ Return ONLY valid JSON, no markdown, no extra text:
     }}
   ]
 }}"""
-        }
-    ]
-
-    result = await llm.chat(
-        model=og.TEE_LLM.GEMINI_2_5_FLASH,
-        messages=messages,
+        }],
         max_tokens=600,
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Debug: log all result fields so we can see what the SDK actually returns
-    print(f"[certify] result type: {type(result)}")
-    print(f"[certify] result attrs: {[a for a in dir(result) if not a.startswith('_')]}")
-    raw_tx = getattr(result, "transaction_hash", None)
-    tee_id = getattr(result, "tee_id", None)
-    print(f"[certify] transaction_hash={raw_tx!r}  tee_id={tee_id!r}")
-
-    # Wait a few seconds for the tx to be indexed on Basescan, then fetch it
-    time.sleep(4)
-    tx_hash = get_latest_opg_tx(WALLET_ADDRESS)
-
-    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
-
-    # Parse LLM content
+    # Step 3: parse AI output immediately (no waiting)
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
             raw_content = result.chat_output.get("content", "")
         elif isinstance(result.chat_output, str):
             raw_content = result.chat_output
-
     parsed = parse_ai_response(raw_content)
+
+    # Step 4: poll Basescan until new tx is confirmed — only then return
+    print(f"[certify] inference complete, waiting for Basescan to record tx...")
+    tx_hash = poll_for_new_tx(WALLET_ADDRESS, known_tx=known_tx, timeout=90)
+    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+    print(f"[certify] resolved tx_hash={tx_hash!r}")
 
     return {
         "cert_id": generate_cert_id(),
@@ -172,8 +181,10 @@ def run_inference(idea: str, author: str) -> dict:
 
     t = threading.Thread(target=target)
     t.start()
-    t.join()
+    t.join(timeout=120)
 
+    if t.is_alive():
+        raise RuntimeError("Timed out waiting for blockchain confirmation.")
     if 'e' in err:
         raise RuntimeError(err['e'])
     return out['data']
