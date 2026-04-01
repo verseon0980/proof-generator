@@ -51,25 +51,3 @@ After deploy, in Vercel dashboard:
 
 Your app is now live at `your-project.vercel.app`
 
----
-
-## What uses your testnet tokens
-
-Only one API call per user submission — `llm.completion()` with `SETTLE_METADATA` mode. This uses the least tokens possible while still recording the TEE attestation on-chain for the competition demo.
-
-`ensure_opg_approval(opg_amount=5.0)` only sends a transaction the first time — after that it's free until your allowance drops below 5 OPG.
-
----
-
-## Testing locally (optional)
-
-```bash
-pip install opengradient flask
-export OG_PRIVATE_KEY=your_private_key_here
-python -c "
-from http.server import HTTPServer
-from api.certify import handler
-HTTPServer(('localhost', 8000), handler).serve_forever()
-"
-```
-Then open `public/index.html` directly in your browser and change the fetch URL to `http://localhost:8000/api/certify`.
