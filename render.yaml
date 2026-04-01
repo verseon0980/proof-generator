@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: proof-generator
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: OG_PRIVATE_KEY
+        sync: false
+      - key: BASESCAN_API_KEY
+        sync: false
