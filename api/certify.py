@@ -23,7 +23,7 @@ except Exception:
     pass
 
 
-def fetch_recent_txs(wallet: str) -> list:
+def _fetch_latest_tx_data(wallet: str) -> dict | None:
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
@@ -31,34 +31,35 @@ def fetch_recent_txs(wallet: str) -> list:
         f"&action=tokentx"
         f"&contractaddress={OPG_TOKEN}"
         f"&address={wallet}"
-        f"&page=1&offset=10&sort=desc"
+        f"&page=1&offset=1&sort=desc"
         f"&apikey={BASESCAN_API_KEY}"
     )
     with urllib.request.urlopen(url, timeout=10) as resp:
         data = json.loads(resp.read())
     if data.get("status") == "1" and data.get("result"):
-        return data["result"]
-    return []
+        return data["result"][0]
+    return None
 
 
-def poll_for_tx(wallet: str, tee_timestamp: int, old_hash: str | None, timeout: int = 55) -> str | None:
+def poll_for_tx_after(wallet: str, after_timestamp: int, timeout: int = 45) -> str | None:
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         try:
-            txs = fetch_recent_txs(wallet)
-            for tx in txs:
-                tx_ts = int(tx.get("timeStamp", 0))
-                tx_h = tx.get("hash", "")
-                # New tx within 300s window of tee_timestamp
-                if tx_h and tx_h != old_hash and abs(tx_ts - tee_timestamp) <= 300:
-                    print(f"[certify] poll #{attempt}: FOUND tx_hash={tx_h!r} tx_ts={tx_ts} tee_ts={tee_timestamp} diff={tx_ts - tee_timestamp}s")
-                    return tx_h
-            print(f"[certify] poll #{attempt}: no match yet (tee_ts={tee_timestamp})")
+            tx_data = _fetch_latest_tx_data(wallet)
+            if tx_data:
+                tx_ts = int(tx_data.get("timeStamp", 0))
+                tx_hash = tx_data.get("hash", "")
+                print(f"[certify] poll #{attempt}: ts={tx_ts} after={after_timestamp} hash={tx_hash!r}")
+                if tx_ts > after_timestamp:
+                    print(f"[certify] new tx confirmed: {tx_hash}")
+                    return tx_hash
+            else:
+                print(f"[certify] poll #{attempt}: no tx found yet")
         except Exception as e:
             print(f"[certify] poll #{attempt} error: {e}")
-        time.sleep(3)
+        time.sleep(2)
     print(f"[certify] timed out after {timeout}s")
     return None
 
@@ -90,15 +91,8 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # Snapshot old tx hash BEFORE inference
-    old_hash = None
-    try:
-        txs = fetch_recent_txs(WALLET_ADDRESS)
-        if txs:
-            old_hash = txs[0].get("hash")
-            print(f"[certify] old_hash={old_hash!r}")
-    except Exception as e:
-        print(f"[certify] could not fetch old tx: {e}")
+    before_ts = int(time.time())
+    print(f"[certify] before_ts={before_ts}")
 
     llm = og.LLM(private_key=PRIVATE_KEY)
     llm.ensure_opg_approval(0.1)
@@ -135,9 +129,6 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    tee_timestamp = getattr(result, "tee_timestamp", None)
-    print(f"[certify] tee_timestamp={tee_timestamp!r} old_hash={old_hash!r}")
-
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
@@ -146,9 +137,18 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    tx_hash = None
-    if tee_timestamp and WALLET_ADDRESS:
-        tx_hash = poll_for_tx(WALLET_ADDRESS, int(tee_timestamp), old_hash, timeout=55)
+    print(f"[certify] inference done, polling for tx after ts={before_ts}...")
+    tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=45)
+
+    if not tx_hash:
+        print(f"[certify] polling timed out, fetching latest tx as fallback...")
+        try:
+            tx_data = _fetch_latest_tx_data(WALLET_ADDRESS)
+            if tx_data:
+                tx_hash = tx_data.get("hash", "")
+                print(f"[certify] fallback tx_hash={tx_hash!r}")
+        except Exception as e:
+            print(f"[certify] fallback fetch error: {e}")
 
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
@@ -184,10 +184,10 @@ def run_inference(idea: str, author: str) -> dict:
 
     t = threading.Thread(target=target)
     t.start()
-    t.join(timeout=58)
+    t.join(timeout=55)
 
     if t.is_alive():
-        raise RuntimeError("Timed out waiting for inference.")
+        raise RuntimeError("Timed out waiting for blockchain confirmation.")
     if 'e' in err:
         raise RuntimeError(err['e'])
     return out['data']
