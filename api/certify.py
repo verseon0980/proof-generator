@@ -23,8 +23,8 @@ except Exception:
     pass
 
 
-def _fetch_latest_tx(wallet: str) -> str | None:
-    """Hit Etherscan V2 API for latest OPG token transfer from wallet."""
+def _fetch_latest_tx_data(wallet: str) -> dict | None:
+    """Return the full latest tx object (hash + timeStamp) from Etherscan V2."""
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
@@ -38,30 +38,30 @@ def _fetch_latest_tx(wallet: str) -> str | None:
     with urllib.request.urlopen(url, timeout=10) as resp:
         data = json.loads(resp.read())
     if data.get("status") == "1" and data.get("result"):
-        return data["result"][0].get("hash") or None
+        return data["result"][0]
     return None
 
 
-def snapshot_tx(wallet: str) -> str | None:
-    try:
-        return _fetch_latest_tx(wallet)
-    except Exception as e:
-        print(f"[certify] snapshot error: {e}")
-        return None
-
-
-def poll_for_new_tx(wallet: str, known_tx: str | None, timeout: int = 90) -> str | None:
-    """Poll every 5s until a tx different from known_tx appears."""
+def poll_for_tx_after(wallet: str, after_timestamp: int, timeout: int = 90) -> str | None:
+    """
+    Poll every 5s until a tx appears with timeStamp > after_timestamp.
+    Returns the tx hash or None on timeout.
+    """
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         try:
-            tx = _fetch_latest_tx(wallet)
-            print(f"[certify] poll #{attempt}: got={tx!r} known={known_tx!r}")
-            if tx and tx != known_tx:
-                print(f"[certify] new tx found: {tx}")
-                return tx
+            tx_data = _fetch_latest_tx_data(wallet)
+            if tx_data:
+                tx_ts = int(tx_data.get("timeStamp", 0))
+                tx_hash = tx_data.get("hash", "")
+                print(f"[certify] poll #{attempt}: ts={tx_ts} after={after_timestamp} hash={tx_hash!r}")
+                if tx_ts > after_timestamp:
+                    print(f"[certify] new tx confirmed: {tx_hash}")
+                    return tx_hash
+            else:
+                print(f"[certify] poll #{attempt}: no tx found yet")
         except Exception as e:
             print(f"[certify] poll #{attempt} error: {e}")
         time.sleep(5)
@@ -96,11 +96,12 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # 1. Snapshot latest tx before inference
-    known_tx = snapshot_tx(WALLET_ADDRESS)
-    print(f"[certify] snapshot before inference: {known_tx!r}")
+    # 1. Record current time as the "before" marker
+    # Use Unix timestamp so we can compare with Etherscan's timeStamp field
+    before_ts = int(time.time())
+    print(f"[certify] before_ts={before_ts}")
 
-    # 2. Run inference — exact pattern from official example
+    # 2. Run inference
     llm = og.LLM(private_key=PRIVATE_KEY)
     llm.ensure_opg_approval(0.1)
 
@@ -136,7 +137,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # 3. Parse AI output
+    # 3. Parse AI output immediately
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
@@ -145,9 +146,9 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # 4. Poll until new tx is confirmed on-chain
-    print(f"[certify] inference done, polling for new tx...")
-    tx_hash = poll_for_new_tx(WALLET_ADDRESS, known_tx=known_tx, timeout=90)
+    # 4. Poll for a tx with timestamp AFTER before_ts
+    print(f"[certify] inference done, polling for tx after ts={before_ts}...")
+    tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=90)
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
 
