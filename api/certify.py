@@ -80,7 +80,7 @@ def parse_ai_response(raw: str) -> dict:
 async def _infer(idea: str, author: str) -> dict:
     # Exact pattern from official example: og.LLM + llm.chat()
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(opg_amount=0.1)
+    llm.ensure_opg_approval(0.1)
 
     messages = [
         {
