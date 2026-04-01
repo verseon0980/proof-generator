@@ -22,17 +22,6 @@ def hash_idea(idea: str) -> str:
     return "0x" + hashlib.sha256(idea.encode()).hexdigest()
 
 
-def get_wallet_address():
-    """Derive the wallet address from private key so we can link to it on Basescan."""
-    try:
-        from eth_account import Account
-        acct = Account.from_key(PRIVATE_KEY)
-        return acct.address
-    except Exception as e:
-        print(f"[certify] Could not derive wallet address: {e}")
-        return None
-
-
 def parse_ai_response(raw: str) -> dict:
     clean = re.sub(r"```(?:json)?", "", raw or "").strip().rstrip("`").strip()
     match = re.search(r'\{.*\}', clean, re.DOTALL)
@@ -92,23 +81,11 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # Log all hash fields for debugging
-    tx_hash = getattr(result, 'transaction_hash', None)
-    pay_hash = getattr(result, 'payment_hash', None)
-    print(f"[certify] transaction_hash={repr(tx_hash)}")
-    print(f"[certify] payment_hash={repr(pay_hash)}")
+    # On opengradient==0.8.0, result.payment_hash returns the real Base Sepolia tx hash
+    payment_hash = result.payment_hash or ""
+    print(f"[certify] payment_hash: {repr(payment_hash)}")
 
-    # The SDK returns "external" for transaction_hash on x402/LLM calls.
-    # Neither field reliably gives us a tx hash.
-    # Instead we link to the wallet address on Basescan — every OPG payment
-    # from this wallet shows up there, which IS the on-chain proof.
-    wallet_address = get_wallet_address()
-    print(f"[certify] wallet_address={wallet_address}")
-
-    if wallet_address:
-        explorer_url = f"https://sepolia.basescan.org/address/{wallet_address}"
-    else:
-        explorer_url = "https://sepolia.basescan.org"
+    explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
 
     return {
         "cert_id": generate_cert_id(),
@@ -116,7 +93,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "wallet_address": wallet_address,
+        "payment_hash": payment_hash,
         "explorer_url": explorer_url,
         "title": parsed.get("title", "Idea certificate"),
         "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
