@@ -40,7 +40,7 @@ def parse_ai_response(raw: str) -> dict:
 
 async def _infer(idea: str, author: str) -> dict:
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(opg_amount=1.0)
+    llm.ensure_opg_approval(0.1)
 
     messages = [
         {
