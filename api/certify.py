@@ -24,7 +24,6 @@ except Exception:
 
 
 def _fetch_latest_tx_data(wallet: str) -> dict | None:
-    """Return the full latest tx object (hash + timeStamp) from Etherscan V2."""
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
@@ -42,11 +41,7 @@ def _fetch_latest_tx_data(wallet: str) -> dict | None:
     return None
 
 
-def poll_for_tx_after(wallet: str, after_timestamp: int, timeout: int = 90) -> str | None:
-    """
-    Poll every 5s until a tx appears with timeStamp > after_timestamp.
-    Returns the tx hash or None on timeout.
-    """
+def poll_for_tx_after(wallet: str, after_timestamp: int, timeout: int = 45) -> str | None:
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
@@ -64,7 +59,7 @@ def poll_for_tx_after(wallet: str, after_timestamp: int, timeout: int = 90) -> s
                 print(f"[certify] poll #{attempt}: no tx found yet")
         except Exception as e:
             print(f"[certify] poll #{attempt} error: {e}")
-        time.sleep(5)
+        time.sleep(2)
     print(f"[certify] timed out after {timeout}s")
     return None
 
@@ -96,12 +91,9 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    # 1. Record current time as the "before" marker
-    # Use Unix timestamp so we can compare with Etherscan's timeStamp field
     before_ts = int(time.time())
     print(f"[certify] before_ts={before_ts}")
 
-    # 2. Run inference
     llm = og.LLM(private_key=PRIVATE_KEY)
     llm.ensure_opg_approval(0.1)
 
@@ -137,7 +129,6 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # 3. Parse AI output immediately
     raw_content = ""
     if result.chat_output:
         if isinstance(result.chat_output, dict):
@@ -146,9 +137,8 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # 4. Poll for a tx with timestamp AFTER before_ts
     print(f"[certify] inference done, polling for tx after ts={before_ts}...")
-    tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=90)
+    tx_hash = poll_for_tx_after(WALLET_ADDRESS, after_timestamp=before_ts, timeout=45)
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
 
@@ -183,7 +173,7 @@ def run_inference(idea: str, author: str) -> dict:
 
     t = threading.Thread(target=target)
     t.start()
-    t.join(timeout=120)
+    t.join(timeout=55)
 
     if t.is_alive():
         raise RuntimeError("Timed out waiting for blockchain confirmation.")
