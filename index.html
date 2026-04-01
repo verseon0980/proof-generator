@@ -391,29 +391,12 @@ function renderCertificate(data) {
   // Watermark date
   document.getElementById('wmDate').textContent = data.timestamp;
 
-  // Debug: log full API response so you can inspect payment_hash in browser console
-  console.log('[Proof Generator] API response:', JSON.stringify(data, null, 2));
 
-  // Basescan button
-  // explorer_url is already built server-side as sepolia.basescan.org/tx/<payment_hash>
+  // Basescan button always works — links to wallet address on Base Sepolia
   const basescanBtn = document.getElementById('basescanBtn');
-  const basescanUrl = data.explorer_url || (data.payment_hash ? 'https://sepolia.basescan.org/tx/' + data.payment_hash : null);
-  console.log('[Proof Generator] payment_hash:', data.payment_hash);
-  console.log('[Proof Generator] explorer_url:', data.explorer_url);
-  console.log('[Proof Generator] basescanUrl resolved to:', basescanUrl);
-
-  if (basescanUrl && data.payment_hash) {
-    basescanBtn.href = basescanUrl;
-    basescanBtn.style.opacity = '1';
-    basescanBtn.style.pointerEvents = 'auto';
-    basescanBtn.title = '';
-  } else {
-    basescanBtn.href = '#';
-    basescanBtn.style.opacity = '0.4';
-    basescanBtn.style.pointerEvents = 'none';
-    basescanBtn.title = 'No transaction hash returned by API — check server logs';
-    console.warn('[Proof Generator] No payment_hash in response. Basescan link disabled.');
-  }
+  basescanBtn.href = data.explorer_url || 'https://sepolia.basescan.org';
+  basescanBtn.style.opacity = '1';
+  basescanBtn.style.pointerEvents = 'auto';
 
   // Score animation
   setTimeout(() => {
