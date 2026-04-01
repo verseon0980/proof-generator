@@ -163,9 +163,9 @@
   .wm-brand { color: var(--accent); font-weight: 600; font-family: 'Syne', sans-serif; letter-spacing: 0.04em; font-size: 0.75rem; }
 
   /* ACTION BUTTONS */
-  .action-row { display: flex; gap: 10px; margin-top: 0; }
+  .action-row { display: block; margin-top: 0; }
   .action-btn {
-    flex: 1; padding: 12px 10px;
+    width: 100%; padding: 12px 10px;
     background: transparent;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -223,7 +223,7 @@
     <div class="spinner"></div>
     <div class="loading-text">Generating your certificate...</div>
     <div class="loading-step" id="loadingStep">Connecting to OpenGradient TEE</div>
-    <div class="loading-note" id="loadingNote">This may take up to 60s while the transaction confirms on-chain</div>
+    <div class="loading-note" id="loadingNote"></div>
   </div>
 
   <!-- CERTIFICATE -->
@@ -277,10 +277,10 @@
     </div>
 
     <div class="action-row">
-      <a class="action-btn" id="basescanBtn" href="#" target="_blank" rel="noopener">
+      <!-- <a class="action-btn" id="basescanBtn" href="#" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 010 20"/><path d="M12 2a15.3 15.3 0 000 20"/></svg>
         View on Basescan
-      </a>
+      </a> -->
       <button class="action-btn primary" id="downloadBtn" onclick="downloadPNG()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Download PNG
@@ -298,7 +298,7 @@ const STEPS = [
   "Running verifiable inference",
   "Analyzing originality & prior art",
   "Waiting for on-chain confirmation",
-  "Transaction confirmed on Base Sepolia",
+  "Transaction confirmed",
   "Certificate ready"
 ];
 
@@ -402,16 +402,16 @@ function renderCertificate(data) {
   document.getElementById('wmDate').textContent = data.timestamp;
 
   // Basescan button — only link if we have a real tx
-  const basescanBtn = document.getElementById('basescanBtn');
-  if (data.explorer_url) {
-    basescanBtn.href = data.explorer_url;
-    basescanBtn.style.opacity = '1';
-    basescanBtn.style.pointerEvents = 'auto';
-  } else {
-    basescanBtn.style.opacity = '0.35';
-    basescanBtn.style.pointerEvents = 'none';
-    basescanBtn.title = 'Transaction not yet indexed';
-  }
+  // const basescanBtn = document.getElementById('basescanBtn');
+  // if (data.explorer_url) {
+  //   basescanBtn.href = data.explorer_url;
+  //   basescanBtn.style.opacity = '1';
+  //   basescanBtn.style.pointerEvents = 'auto';
+  // } else {
+  //   basescanBtn.style.opacity = '0.35';
+  //   basescanBtn.style.pointerEvents = 'none';
+  //   basescanBtn.title = 'Transaction not yet indexed';
+  // }
 
   setTimeout(() => {
     const s = data.scores;
