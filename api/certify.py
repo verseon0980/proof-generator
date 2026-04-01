@@ -86,6 +86,12 @@ Return ONLY valid JSON, no markdown, no extra text:
     payment_hash = result.payment_hash or ""
     explorer_url = f"https://sepolia.basescan.org/tx/{payment_hash}" if payment_hash else None
 
+    # Server-side debug log — visible in Vercel function logs
+    print(f"[certify] payment_hash raw: {repr(result.payment_hash)}")
+    print(f"[certify] transaction_hash raw: {repr(result.transaction_hash)}")
+    print(f"[certify] explorer_url: {explorer_url}")
+    print(f"[certify] chat_output keys: {list(result.chat_output.keys()) if result.chat_output else 'None'}")
+
     return {
         "cert_id": generate_cert_id(),
         "author": author,
