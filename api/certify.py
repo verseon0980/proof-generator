@@ -12,8 +12,6 @@ import opengradient as og
 from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
-# Basescan API key - add BASESCAN_API_KEY to your Vercel env vars
-# Get free key at https://basescan.org/register (free tier works)
 BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
 
 # OPG token contract on Base Sepolia
@@ -26,7 +24,9 @@ except Exception:
 
 
 def get_latest_opg_tx(wallet: str) -> str | None:
-    """Fetch the latest OPG token transfer tx hash from Basescan API."""
+    """Fallback: fetch the latest OPG token transfer tx hash from Basescan API."""
+    if not wallet:
+        return None
     try:
         url = (
             f"https://api-sepolia.basescan.org/api"
@@ -40,10 +40,10 @@ def get_latest_opg_tx(wallet: str) -> str | None:
             data = json.loads(resp.read())
         if data.get("status") == "1" and data.get("result"):
             tx = data["result"][0].get("hash", "")
-            print(f"[certify] latest OPG tx from Basescan: {tx}")
-            return tx
+            print(f"[certify] fallback Basescan tx: {tx}")
+            return tx if tx else None
         else:
-            print(f"[certify] Basescan returned: {data.get('message')} / {data.get('result')}")
+            print(f"[certify] Basescan: {data.get('message')} / {data.get('result')}")
             return None
     except Exception as e:
         print(f"[certify] Basescan API error: {e}")
@@ -77,8 +77,8 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
-    llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    # ── NEW API: og.Client ──────────────────────────────────────────────────
+    client = og.Client(private_key=PRIVATE_KEY)
 
     messages = [
         {
@@ -109,20 +109,38 @@ Return ONLY valid JSON, no markdown, no extra text:
         }
     ]
 
-    result = await llm.chat(
+    # Use INDIVIDUAL_FULL so the full tx is settled on-chain and visible on Basescan
+    result = await client.llm.chat(
         model=og.TEE_LLM.GEMINI_2_5_FLASH,
         messages=messages,
         max_tokens=600,
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    raw = result.chat_output.get("content", "") if result.chat_output else ""
-    parsed = parse_ai_response(raw)
+    # ── Extract tx hash from result ─────────────────────────────────────────
+    raw_tx = getattr(result, "transaction_hash", None)
+    print(f"[certify] completion.transaction_hash = {raw_tx!r}")
 
-    # Fetch the latest OPG token transfer from your wallet on Basescan
-    # This is the actual payment tx that just happened
-    tx_hash = get_latest_opg_tx(WALLET_ADDRESS) if WALLET_ADDRESS else None
+    # If the SDK gives us a real 0x hash, use it directly
+    if raw_tx and raw_tx not in ("external", "", None) and raw_tx.startswith("0x") and len(raw_tx) >= 60:
+        tx_hash = raw_tx
+        print(f"[certify] using SDK tx hash: {tx_hash}")
+    else:
+        # Fallback: query Basescan for the most recent OPG transfer from our wallet
+        print(f"[certify] SDK hash unusable ({raw_tx!r}), falling back to Basescan")
+        tx_hash = get_latest_opg_tx(WALLET_ADDRESS)
+
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+
+    # ── Parse LLM response ──────────────────────────────────────────────────
+    raw_content = ""
+    if result.chat_output:
+        if isinstance(result.chat_output, dict):
+            raw_content = result.chat_output.get("content", "")
+        elif isinstance(result.chat_output, str):
+            raw_content = result.chat_output
+
+    parsed = parse_ai_response(raw_content)
 
     return {
         "cert_id": generate_cert_id(),
