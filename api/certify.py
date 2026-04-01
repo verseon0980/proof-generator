@@ -5,11 +5,49 @@ import asyncio
 import datetime
 import re
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 
 import opengradient as og
+from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
+# Basescan API key - add BASESCAN_API_KEY to your Vercel env vars
+# Get free key at https://basescan.org/register (free tier works)
+BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
+
+# OPG token contract on Base Sepolia
+OPG_TOKEN = "0x240b09731D96979f50B2C649C9CE10FcF9C7987F"
+
+try:
+    WALLET_ADDRESS = Account.from_key(PRIVATE_KEY).address if PRIVATE_KEY else None
+except Exception:
+    WALLET_ADDRESS = None
+
+
+def get_latest_opg_tx(wallet: str) -> str | None:
+    """Fetch the latest OPG token transfer tx hash from Basescan API."""
+    try:
+        url = (
+            f"https://api-sepolia.basescan.org/api"
+            f"?module=account&action=tokentx"
+            f"&contractaddress={OPG_TOKEN}"
+            f"&address={wallet}"
+            f"&page=1&offset=1&sort=desc"
+            f"&apikey={BASESCAN_API_KEY}"
+        )
+        with urllib.request.urlopen(url, timeout=8) as resp:
+            data = json.loads(resp.read())
+        if data.get("status") == "1" and data.get("result"):
+            tx = data["result"][0].get("hash", "")
+            print(f"[certify] latest OPG tx from Basescan: {tx}")
+            return tx
+        else:
+            print(f"[certify] Basescan returned: {data.get('message')} / {data.get('result')}")
+            return None
+    except Exception as e:
+        print(f"[certify] Basescan API error: {e}")
+        return None
 
 
 def generate_cert_id():
@@ -40,7 +78,7 @@ def parse_ai_response(raw: str) -> dict:
 
 async def _infer(idea: str, author: str) -> dict:
     llm = og.LLM(private_key=PRIVATE_KEY)
-    llm.ensure_opg_approval(0.1)
+    llm.ensure_opg_approval(opg_amount=1.0)
 
     messages = [
         {
@@ -81,34 +119,9 @@ Return ONLY valid JSON, no markdown, no extra text:
     raw = result.chat_output.get("content", "") if result.chat_output else ""
     parsed = parse_ai_response(raw)
 
-    # ============================================================
-    # DUMP EVERYTHING — check Vercel function logs after deploying
-    # ============================================================
-    print("=== RESULT TYPE ===", type(result).__name__)
-    try:
-        print("=== RESULT __dict__ ===", result.__dict__)
-    except:
-        pass
-    for attr in dir(result):
-        if attr.startswith("_"):
-            continue
-        try:
-            val = getattr(result, attr)
-            if not callable(val):
-                print(f"  result.{attr} = {repr(val)}")
-        except Exception as e:
-            print(f"  result.{attr} ERROR: {e}")
-    # ============================================================
-
-    # Find whichever field has a real 0x... hash
-    tx_hash = ""
-    for field in ["transaction_hash", "payment_hash", "tx_hash", "hash", "receipt_hash", "settlement_hash"]:
-        val = getattr(result, field, None)
-        if val and isinstance(val, str) and val.startswith("0x") and len(val) > 20:
-            tx_hash = val
-            print(f"=== FOUND HASH in result.{field} = {val} ===")
-            break
-
+    # Fetch the latest OPG token transfer from your wallet on Basescan
+    # This is the actual payment tx that just happened
+    tx_hash = get_latest_opg_tx(WALLET_ADDRESS) if WALLET_ADDRESS else None
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
 
     return {
@@ -117,7 +130,7 @@ Return ONLY valid JSON, no markdown, no extra text:
         "idea": idea,
         "idea_hash": hash_idea(idea),
         "timestamp": datetime.datetime.utcnow().strftime("%B %d, %Y · %H:%M UTC"),
-        "transaction_hash": tx_hash,
+        "transaction_hash": tx_hash or "",
         "explorer_url": explorer_url,
         "title": parsed.get("title", "Idea certificate"),
         "scores": parsed.get("scores", {"overall": 70, "novelty": 70, "market_gap": 70, "technical": 70, "prior_art_risk": 30}),
