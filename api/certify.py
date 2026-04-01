@@ -23,12 +23,8 @@ except Exception:
     pass
 
 
-def fetch_tx_by_timestamp(wallet: str, tee_address: str, tee_timestamp: int) -> str | None:
-    """
-    Fetch the tx hash by finding a token transfer from wallet to tee_address
-    at or near tee_timestamp. We fetch last 10 txs and match by 'to' address
-    and timestamp window.
-    """
+def fetch_recent_txs(wallet: str) -> list:
+    """Fetch last 10 token txs from Basescan."""
     url = (
         f"https://api.etherscan.io/v2/api"
         f"?chainid=84532"
@@ -41,32 +37,31 @@ def fetch_tx_by_timestamp(wallet: str, tee_address: str, tee_timestamp: int) -> 
     )
     with urllib.request.urlopen(url, timeout=10) as resp:
         data = json.loads(resp.read())
-
-    if data.get("status") != "1" or not data.get("result"):
-        return None
-
-    tee_addr_lower = tee_address.lower()
-    for tx in data["result"]:
-        tx_ts = int(tx.get("timeStamp", 0))
-        tx_to = tx.get("to", "").lower()
-        # Match: sent to tee_payment_address within 120s window of tee_timestamp
-        if tx_to == tee_addr_lower and abs(tx_ts - tee_timestamp) <= 120:
-            return tx.get("hash")
-
-    return None
+    if data.get("status") == "1" and data.get("result"):
+        return data["result"]
+    return []
 
 
-def poll_for_tx(wallet: str, tee_address: str, tee_timestamp: int, timeout: int = 45) -> str | None:
-    """Poll until tx appears matching tee_address and tee_timestamp."""
+def poll_for_tx(wallet: str, tee_timestamp: int, old_hash: str | None, timeout: int = 45) -> str | None:
+    """
+    Poll until we find a tx that:
+    1. Has a different hash from old_hash (it's new)
+    2. Has timeStamp within 180s of tee_timestamp
+    """
     deadline = time.time() + timeout
     attempt = 0
     while time.time() < deadline:
         attempt += 1
         try:
-            tx_hash = fetch_tx_by_timestamp(wallet, tee_address, tee_timestamp)
-            print(f"[certify] poll #{attempt}: tx_hash={tx_hash!r}")
-            if tx_hash:
-                return tx_hash
+            txs = fetch_recent_txs(wallet)
+            for tx in txs:
+                tx_ts = int(tx.get("timeStamp", 0))
+                tx_h = tx.get("hash", "")
+                # New tx within 180s window of tee_timestamp
+                if tx_h and tx_h != old_hash and abs(tx_ts - tee_timestamp) <= 180:
+                    print(f"[certify] poll #{attempt}: FOUND tx_hash={tx_h!r} tx_ts={tx_ts} tee_ts={tee_timestamp}")
+                    return tx_h
+            print(f"[certify] poll #{attempt}: no match yet (tee_ts={tee_timestamp})")
         except Exception as e:
             print(f"[certify] poll #{attempt} error: {e}")
         time.sleep(3)
@@ -101,6 +96,16 @@ def parse_ai_response(raw: str) -> dict:
 
 
 async def _infer(idea: str, author: str) -> dict:
+    # Snapshot old tx hash BEFORE inference
+    old_hash = None
+    try:
+        txs = fetch_recent_txs(WALLET_ADDRESS)
+        if txs:
+            old_hash = txs[0].get("hash")
+            print(f"[certify] old_hash={old_hash!r}")
+    except Exception as e:
+        print(f"[certify] could not fetch old tx: {e}")
+
     llm = og.LLM(private_key=PRIVATE_KEY)
     llm.ensure_opg_approval(0.1)
 
@@ -136,10 +141,9 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Extract tee_payment_address and tee_timestamp directly from SDK result
-    tee_address = getattr(result, "tee_payment_address", None)
+    # Get exact tee_timestamp from SDK — much more precise than our before_ts
     tee_timestamp = getattr(result, "tee_timestamp", None)
-    print(f"[certify] tee_payment_address={tee_address!r} tee_timestamp={tee_timestamp!r}")
+    print(f"[certify] tee_timestamp={tee_timestamp!r} old_hash={old_hash!r}")
 
     # Get AI output
     raw_content = ""
@@ -150,10 +154,10 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    # Poll Basescan for the tx matching tee_address + tee_timestamp
+    # Poll using exact tee_timestamp + old_hash to uniquely identify this tx
     tx_hash = None
-    if tee_address and tee_timestamp and WALLET_ADDRESS:
-        tx_hash = poll_for_tx(WALLET_ADDRESS, tee_address, int(tee_timestamp), timeout=45)
+    if tee_timestamp and WALLET_ADDRESS:
+        tx_hash = poll_for_tx(WALLET_ADDRESS, int(tee_timestamp), old_hash, timeout=45)
 
     explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] final explorer_url={explorer_url!r}")
