@@ -12,8 +12,6 @@ import opengradient as og
 from eth_account import Account
 
 PRIVATE_KEY = os.environ.get("OG_PRIVATE_KEY")
-BASESCAN_API_KEY = os.environ.get("BASESCAN_API_KEY", "")
-OPG_TOKEN = "0x240b09731D96979f50B2C649C9CE10FcF9C7987F"
 WALLET_ADDRESS = None
 
 try:
@@ -84,13 +82,14 @@ Return ONLY valid JSON, no markdown, no extra text:
         x402_settlement_mode=og.x402SettlementMode.INDIVIDUAL_FULL,
     )
 
-    # Get tx hash directly from SDK response — no polling needed
+    # Get tx hash directly from SDK — this is the official way per OpenGradient docs
     tx_hash = None
     if isinstance(result, dict):
-        tx_hash = result.get("payment_hash")
+        tx_hash = result.get("transaction_hash")
     else:
-        tx_hash = getattr(result, "payment_hash", None)
-    print(f"[certify] payment_hash from SDK: {tx_hash!r}")
+        tx_hash = getattr(result, "transaction_hash", None)
+
+    print(f"[certify] transaction_hash from SDK: {tx_hash!r}")
 
     # Get AI output
     raw_content = ""
@@ -101,7 +100,8 @@ Return ONLY valid JSON, no markdown, no extra text:
             raw_content = result.chat_output
     parsed = parse_ai_response(raw_content)
 
-    explorer_url = f"https://sepolia.basescan.org/tx/{tx_hash}" if tx_hash else None
+    # Use OpenGradient's own explorer, not Basescan
+    explorer_url = f"https://explorer.opengradient.ai/tx/{tx_hash}" if tx_hash else None
     print(f"[certify] explorer_url={explorer_url!r}")
 
     return {
