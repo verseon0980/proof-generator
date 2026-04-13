@@ -3,768 +3,489 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VoiceScribe — Speak. Generate. Verify.</title>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<title>Proof Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   :root {
-    --ink: #0f0e0c;
-    --paper: #f5f0e8;
-    --cream: #ede8dc;
-    --accent: #c8502a;
-    --green: #2a7a4b;
-    --muted: #8a8478;
-    --border: #d4cfc4;
-    --recording: #e03c2b;
+    --bg: #0E2A35;
+    --bg2: #162f3b;
+    --bg3: #1c3a48;
+    --accent: #3ECFB2;
+    --accent2: #2ab89d;
+    --text: #e8f4f0;
+    --muted: #7aa8b8;
+    --border: rgba(62,207,178,0.15);
+    --border2: rgba(62,207,178,0.3);
+    --danger: #ff6b6b;
+    --warn: #f0a500;
   }
-
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
   body {
-    background: var(--paper);
-    color: var(--ink);
+    background: var(--bg);
+    color: var(--text);
     font-family: 'DM Sans', sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    align-items: center;
   }
-
-  /* ── HEADER ── */
   header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 48px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .logo {
-    font-family: 'Playfair Display', serif;
-    font-size: 1.5rem;
-    font-weight: 700;
-  }
-  .logo span { color: var(--accent); font-style: italic; }
-
-  .header-badges {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .hbadge {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.62rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 5px 12px;
-    border-radius: 3px;
-    border: 1px solid;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .hbadge-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-    animation: blink 2s ease-in-out infinite;
-  }
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-  .hbadge.tee  { color: var(--green); border-color: var(--green); background: #f0faf4; }
-  .hbadge.x402 { color: var(--accent); border-color: #e8b49a; background: #fdf6f3; }
-
-  /* ── LAYOUT ── */
-  main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 360px 1fr;
-    min-height: calc(100vh - 69px);
-  }
-
-  /* ── LEFT PANEL ── */
-  .left {
-    border-right: 1px solid var(--border);
-    background: var(--cream);
-    padding: 40px 32px;
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-  }
-
-  .label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.63rem;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 10px;
-  }
-
-  .mic-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    padding: 20px 0;
-  }
-
-  .mic-btn {
-    width: 88px;
-    height: 88px;
-    border-radius: 50%;
-    border: 2px solid var(--ink);
-    background: var(--paper);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    outline: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .mic-btn:hover { background: var(--ink); }
-  .mic-btn:hover svg path { fill: var(--paper); }
-  .mic-btn.recording {
-    border-color: var(--recording);
-    background: var(--recording);
-    animation: pulse 1.4s ease-out infinite;
-  }
-  .mic-btn.recording svg path { fill: white; }
-
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(224,60,43,0.4); }
-    70%  { box-shadow: 0 0 0 18px rgba(224,60,43,0); }
-    100% { box-shadow: 0 0 0 0 rgba(224,60,43,0); }
-  }
-
-  .mic-status {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--muted);
-    text-align: center;
-  }
-  .mic-status.on { color: var(--recording); font-weight: 500; }
-
-  .transcript-box {
-    background: var(--paper);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 14px;
-    min-height: 110px;
-    font-family: 'Playfair Display', serif;
-    font-size: 0.92rem;
-    line-height: 1.65;
-    font-style: italic;
-    color: var(--ink);
-    word-break: break-word;
-  }
-  .transcript-box .ph { color: var(--muted); }
-
-  .gen-btn {
     width: 100%;
-    padding: 14px;
-    background: var(--ink);
-    color: var(--paper);
-    border: none;
-    border-radius: 4px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 500;
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .gen-btn:hover:not(:disabled) { background: var(--accent); }
-  .gen-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-  .clear-btn {
-    width: 100%;
-    padding: 10px;
-    background: transparent;
-    color: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .clear-btn:hover { border-color: var(--ink); color: var(--ink); }
-
-  .error {
-    display: none;
-    padding: 10px 14px;
-    background: #fdf0ee;
-    border: 1px solid #f0c4bc;
-    border-radius: 4px;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--accent);
-    line-height: 1.5;
-  }
-  .error.show { display: block; }
-
-  /* ── RIGHT PANEL ── */
-  .right {
-    padding: 48px 64px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    opacity: 0.35;
-  }
-  .empty-icon { font-size: 2.5rem; }
-  .empty p {
-    font-family: 'Playfair Display', serif;
-    font-style: italic;
-    color: var(--muted);
+    padding: 2rem 0 1.5rem;
     text-align: center;
-  }
-
-  .loading {
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-    padding: 80px 0;
-  }
-  .loading.show { display: flex; }
-
-  .dots { display: flex; gap: 8px; }
-  .dots span {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--ink);
-    animation: bounce 1.2s ease-in-out infinite;
-  }
-  .dots span:nth-child(2) { animation-delay: 0.2s; }
-  .dots span:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes bounce {
-    0%,80%,100% { transform: translateY(0); opacity: 0.3; }
-    40%          { transform: translateY(-10px); opacity: 1; }
-  }
-
-  .loading-text {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--muted);
-  }
-
-  /* ── ARTICLE ── */
-  .article { display: none; }
-  .article.show { display: flex; flex-direction: column; animation: fadein 0.5s ease; }
-
-  @keyframes fadein {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .article-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding-bottom: 18px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 28px;
+    margin-bottom: 3rem;
   }
-
-  .meta-left { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-
-  .badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.62rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 4px 10px;
-    border-radius: 2px;
-    border: 1px solid;
+  .logo-wrap { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .logo-icon {
+    width: 38px; height: 38px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
   }
-  .badge.tee  { color: var(--green); border-color: var(--green); background: #f0faf4; }
-  .badge.x402 { color: var(--accent); border-color: #e8b49a; background: #fdf6f3; }
-  .badge-dot  { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .logo-icon svg { width: 22px; height: 22px; stroke: var(--bg); fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  h1 { font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+  .tagline { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+  main { width: 100%; max-width: 680px; padding: 0 1.5rem 4rem; }
 
-  .timestamp {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    color: var(--muted);
+  /* FORM */
+  .form-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; margin-bottom: 2rem; }
+  .form-label { font-family: 'Syne', sans-serif; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; display: block; }
+  .form-hint { font-size: 0.83rem; color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+  textarea {
+    width: 100%; min-height: 130px;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; font-family: 'DM Sans', sans-serif; font-size: 0.95rem;
+    color: var(--text); resize: vertical; line-height: 1.6; transition: border-color 0.2s; margin-bottom: 12px;
   }
-
-  .article-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1.2;
-    margin-bottom: 24px;
-    letter-spacing: -0.3px;
+  textarea:focus { outline: none; border-color: var(--border2); }
+  textarea::placeholder { color: var(--muted); }
+  input[type="text"] {
+    width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 16px; font-family: 'DM Sans', sans-serif; font-size: 0.95rem;
+    color: var(--text); transition: border-color 0.2s; margin-bottom: 16px;
   }
-
-  .article-body {
-    font-family: 'Playfair Display', serif;
-    font-size: 1rem;
-    line-height: 1.85;
-    color: #2a2824;
+  input[type="text"]:focus { outline: none; border-color: var(--border2); }
+  input[type="text"]::placeholder { color: var(--muted); }
+  .submit-btn {
+    width: 100%; background: var(--accent); color: var(--bg); border: none; border-radius: 10px;
+    padding: 14px; font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.03em; transition: background 0.2s, transform 0.1s;
   }
-  .article-body p { margin-bottom: 18px; }
+  .submit-btn:hover { background: var(--accent2); }
+  .submit-btn:active { transform: scale(0.99); }
+  .submit-btn:disabled { background: var(--bg3); color: var(--muted); cursor: not-allowed; border: 1px solid var(--border); }
 
-  /* ── PROOF BLOCK ── */
-  .proof-block {
-    margin-top: 36px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+  /* LOADING */
+  .loading { display: none; text-align: center; padding: 2.5rem; }
+  .loading.active { display: block; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { color: var(--muted); font-size: 0.9rem; }
+  .loading-step { color: var(--accent); font-size: 0.85rem; margin-top: 6px; font-family: 'DM Mono', monospace; }
+  .loading-note { color: var(--muted); font-size: 0.75rem; margin-top: 10px; opacity: 0.7; }
+
+  /* ERROR */
+  .error-box { display: none; background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3); border-radius: 10px; padding: 14px 16px; font-size: 0.88rem; color: var(--danger); margin-bottom: 1rem; }
+  .error-box.active { display: block; }
+
+  /* CERTIFICATE */
+  .cert { display: none; }
+  .cert.active { display: block; }
+
+  .cert-card {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+    position: relative;
     overflow: hidden;
   }
-  .proof-header {
-    background: var(--cream);
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    font-family: 'DM Mono', monospace;
-    font-size: 0.63rem;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--muted);
+  .cert-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--accent);
+    border-radius: 16px 16px 0 0;
   }
-  .proof-rows { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .proof-row  { display: flex; flex-direction: column; gap: 4px; }
-  .proof-key  {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .proof-val {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--ink);
-    word-break: break-all;
-    line-height: 1.5;
-  }
-  .proof-val.hash { color: var(--green); }
+  .cert-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 1.25rem; }
+  .cert-title-wrap { flex: 1; }
+  .cert-title { font-family: 'Syne', sans-serif; font-size: 1.25rem; font-weight: 700; color: var(--text); line-height: 1.3; margin-bottom: 4px; }
+  .cert-by { font-size: 0.83rem; color: var(--muted); }
+  .cert-badge { background: rgba(62,207,178,0.12); border: 1px solid var(--border2); border-radius: 20px; padding: 5px 14px; font-family: 'Syne', sans-serif; font-size: 0.78rem; font-weight: 600; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+  .idea-text { background: var(--bg3); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 14px 16px; font-size: 0.9rem; color: var(--muted); line-height: 1.7; font-style: italic; margin-bottom: 1.25rem; }
 
-  .bottom-btns { margin-top: 20px; display: flex; gap: 10px; }
-  .copy-btn {
-    padding: 8px 18px;
+  /* SCORES */
+  .score-row { display: flex; align-items: center; gap: 20px; margin-bottom: 1.25rem; }
+  .score-circle { width: 80px; height: 80px; flex-shrink: 0; position: relative; }
+  .score-circle svg { transform: rotate(-90deg); }
+  .score-inner { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+  .score-num { font-family: 'Syne', sans-serif; font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .score-lbl { font-size: 0.65rem; color: var(--muted); }
+  .bars { flex: 1; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-name { font-size: 0.78rem; color: var(--muted); width: 130px; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 1s ease; }
+  .bar-val { font-size: 0.78rem; font-weight: 500; color: var(--accent); width: 26px; text-align: right; }
+
+  /* ANALYSIS */
+  .analysis-label { font-family: 'Syne', sans-serif; font-size: 0.72rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .analysis-box { background: var(--bg3); border-radius: 10px; padding: 14px 16px; font-size: 0.88rem; color: var(--text); line-height: 1.7; margin-bottom: 1.25rem; }
+
+  /* SIMILAR */
+  .similar-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .similar-item:last-child { border-bottom: none; }
+  .sim-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .dot-warn { background: var(--warn); }
+  .dot-ok { background: var(--accent); }
+  .sim-title { font-size: 0.88rem; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+  .sim-why { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+
+  .divider { height: 1px; background: var(--border); margin: 1.5rem 0; }
+  .section-title { font-family: 'Syne', sans-serif; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; }
+
+  /* Watermark */
+  .cert-watermark {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+  .wm-brand { color: var(--accent); font-weight: 600; font-family: 'Syne', sans-serif; letter-spacing: 0.04em; font-size: 0.75rem; }
+
+  /* ACTION BUTTONS */
+  .action-row { display: block; margin-top: 0; }
+  .action-btn {
+    width: 100%; padding: 12px 10px;
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.68rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-family: 'DM Sans', sans-serif;
     color: var(--muted);
     cursor: pointer;
     transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    text-decoration: none;
   }
-  .copy-btn:hover { border-color: var(--ink); color: var(--ink); }
+  .action-btn:hover { border-color: var(--border2); color: var(--text); }
+  .action-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+  .action-btn.primary:hover { background: var(--accent2); border-color: var(--accent2); }
+  .action-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
 
-  /* ── MOBILE ── */
-  @media (max-width: 768px) {
-    main { grid-template-columns: 1fr; }
-    .left { border-right: none; border-bottom: 1px solid var(--border); }
-    header { padding: 16px 20px; }
-    .right { padding: 28px 20px; }
-    .header-badges { gap: 6px; }
-    .hbadge { font-size: 0.55rem; padding: 4px 8px; }
+  .tee-pill { display: inline-flex; align-items: center; gap: 6px; background: rgba(62,207,178,0.08); border: 1px solid var(--border2); border-radius: 20px; padding: 4px 12px; font-size: 0.75rem; color: var(--accent); margin-bottom: 1.5rem; }
+  .tee-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .new-btn { width: 100%; background: transparent; border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 600; color: var(--muted); cursor: pointer; transition: all 0.2s; margin-top: 1rem; }
+  .new-btn:hover { border-color: var(--border2); color: var(--text); }
+
+  @media(max-width:500px) {
+    .action-row { flex-direction: column; }
+    .cert-header { flex-direction: column; }
   }
 </style>
 </head>
 <body>
-
 <header>
-  <div class="logo">Voice<span>Scribe</span></div>
-  <div class="header-badges">
-    <div class="hbadge tee"><div class="hbadge-dot"></div>TEE Verified</div>
-    <div class="hbadge x402"><div class="hbadge-dot"></div>x402 On-Chain</div>
+  <div class="logo-wrap">
+    <div class="logo-icon">
+      <svg viewBox="0 0 22 22"><path d="M11 2L3 6v5c0 4 3 6.5 8 8 5-1.5 8-4 8-8V6L11 2z"/><path d="M7.5 11l2.5 2.5 4.5-4.5"/></svg>
+    </div>
+    <h1>Proof Generator</h1>
   </div>
+  <p class="tagline">Verifiable idea originality · Powered by OpenGradient TEE + x402</p>
 </header>
 
 <main>
-
-  <!-- LEFT -->
-  <div class="left">
-
-    <div>
-      <div class="label">Voice Input</div>
-      <div class="mic-wrap">
-        <button class="mic-btn" id="micBtn" type="button">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="#0f0e0c"/>
-            <path d="M17 12C17 14.76 14.76 17 12 17C9.24 17 7 14.76 7 12H5C5 15.53 7.61 18.43 11 18.92V22H13V18.92C16.39 18.43 19 15.53 19 12H17Z" fill="#0f0e0c"/>
-          </svg>
-        </button>
-        <div class="mic-status" id="micStatus">Click to speak</div>
-      </div>
-    </div>
-
-    <div>
-      <div class="label">What you said</div>
-      <div class="transcript-box" id="transcriptBox">
-        <span class="ph" id="ph">Your words will appear here...</span>
-        <span id="tt" style="display:none"></span>
-      </div>
-    </div>
-
-    <div class="error" id="errorBox"></div>
-
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <button class="gen-btn" id="genBtn" type="button" disabled>✦ Generate Article</button>
-      <button class="clear-btn" id="clearBtn" type="button">Clear</button>
-    </div>
-
+  <!-- FORM -->
+  <div class="form-card" id="formSection">
+    <label class="form-label">Your idea</label>
+    <p class="form-hint">Describe your idea in plain English. Your full text stays private — only a fingerprint goes on-chain.</p>
+    <textarea id="ideaText" placeholder="e.g. An app that lets street food vendors accept pre-orders via WhatsApp. Customers send a message, get a queue number, and pay on pickup..."></textarea>
+    <label class="form-label">Your name</label>
+    <input type="text" id="authorName" placeholder="Your name or alias (shown on certificate)" />
+    <div class="error-box" id="errorBox"></div>
+    <button class="submit-btn" id="submitBtn" onclick="submitIdea()">Generate originality certificate</button>
   </div>
 
-  <!-- RIGHT -->
-  <div class="right" id="rightPanel">
+  <!-- LOADING -->
+  <div class="loading" id="loadingSection">
+    <div class="spinner"></div>
+    <div class="loading-text">Generating your certificate...</div>
+    <div class="loading-step" id="loadingStep">Connecting to OpenGradient TEE</div>
+    <div class="loading-note" id="loadingNote"></div>
+  </div>
 
-    <div class="empty" id="emptyState">
-      <div class="empty-icon">✦</div>
-      <p>Speak something.<br>Your verified article<br>will appear here.</p>
+  <!-- CERTIFICATE -->
+  <div class="cert" id="certSection">
+    <div class="tee-pill">
+      <div class="tee-dot"></div>
+      TEE-attested via OpenGradient x402
     </div>
 
-    <div class="loading" id="loadingState">
-      <div class="dots"><span></span><span></span><span></span></div>
-      <div class="loading-text" id="loadingText">Connecting to OpenGradient...</div>
-    </div>
-
-    <div class="article" id="articleOutput">
-      <div class="article-meta">
-        <div class="meta-left">
-          <div class="badge tee"><div class="badge-dot"></div>TEE Verified</div>
-          <div class="badge x402"><div class="badge-dot"></div>x402 Settled</div>
+    <div class="cert-card" id="certCard">
+      <div class="cert-header">
+        <div class="cert-title-wrap">
+          <div class="cert-title" id="certTitle"></div>
+          <div class="cert-by" id="certBy"></div>
         </div>
-        <div class="timestamp" id="ts"></div>
+        <div class="cert-badge" id="certScore"></div>
       </div>
 
-      <div class="article-title" id="artTitle"></div>
-      <div class="article-body" id="artBody"></div>
+      <div class="idea-text" id="certIdeaText"></div>
 
-      <div class="proof-block">
-        <div class="proof-header">On-Chain Proof — OpenGradient</div>
-        <div class="proof-rows">
-          <div class="proof-row">
-            <div class="proof-key">Transaction Hash (x402)</div>
-            <div class="proof-val hash" id="txHash">—</div>
+      <div class="score-row">
+        <div class="score-circle">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#1c3a48" stroke-width="7"/>
+            <circle id="scoreCircle" cx="40" cy="40" r="32" fill="none" stroke="#3ECFB2" stroke-width="7" stroke-dasharray="201" stroke-dashoffset="201" stroke-linecap="round" style="transition:stroke-dashoffset 1.2s ease"/>
+          </svg>
+          <div class="score-inner">
+            <div class="score-num" id="scoreNum">0</div>
+            <div class="score-lbl">/ 100</div>
           </div>
-          <div class="proof-row">
-            <div class="proof-key">Inference Mode</div>
-            <div class="proof-val" id="inferMode">—</div>
-          </div>
-          <div class="proof-row">
-            <div class="proof-key">Settlement Mode</div>
-            <div class="proof-val" id="settleMode">—</div>
-          </div>
-          <div class="proof-row">
-            <div class="proof-key">Model</div>
-            <div class="proof-val" id="modelUsed">—</div>
-          </div>
-          <div class="proof-row">
-            <div class="proof-key">What TEE means</div>
-            <div class="proof-val" style="color:var(--muted);">
-              Your prompt ran inside an Intel TDX hardware enclave. Nobody — not even OpenGradient — could read your input or output. The tx hash above is cryptographic proof it happened.
-            </div>
-          </div>
+        </div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-name">Concept novelty</span><div class="bar-track"><div class="bar-fill" id="bar1" style="width:0%"></div></div><span class="bar-val" id="bv1">0</span></div>
+          <div class="bar-row"><span class="bar-name">Market gap</span><div class="bar-track"><div class="bar-fill" id="bar2" style="width:0%"></div></div><span class="bar-val" id="bv2">0</span></div>
+          <div class="bar-row"><span class="bar-name">Technical distinctness</span><div class="bar-track"><div class="bar-fill" id="bar3" style="width:0%"></div></div><span class="bar-val" id="bv3">0</span></div>
+          <div class="bar-row"><span class="bar-name">Prior art risk</span><div class="bar-track"><div class="bar-fill" id="bar4" style="width:0%"></div></div><span class="bar-val" id="bv4">0</span></div>
         </div>
       </div>
 
-      <div class="bottom-btns">
-        <button class="copy-btn" id="copyArticleBtn" type="button">Copy Article</button>
-        <button class="copy-btn" id="copyHashBtn" type="button">Copy Tx Hash</button>
+      <div class="analysis-label">AI analysis</div>
+      <div class="analysis-box" id="analysisText"></div>
+
+      <div class="divider"></div>
+      <div class="section-title">Similar things that already exist</div>
+      <div id="similarList"></div>
+
+      <div class="cert-watermark">
+        <span class="wm-brand">Proof Generator · OpenGradient TEE</span>
+        <span id="wmDate"></span>
       </div>
     </div>
 
+    <div class="action-row">
+      <!-- <a class="action-btn" id="basescanBtn" href="#" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 010 20"/><path d="M12 2a15.3 15.3 0 000 20"/></svg>
+        View on Basescan
+      </a> -->
+      <button class="action-btn primary" id="downloadBtn" onclick="downloadPNG()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download PNG
+      </button>
+    </div>
+
+    <button class="new-btn" onclick="resetForm()">+ Certify another idea</button>
   </div>
 </main>
 
 <script>
-(function() {
-  'use strict';
+const STEPS = [
+  "Connecting to OpenGradient TEE",
+  "x402 payment authorized",
+  "Running verifiable inference",
+  "Analyzing originality & prior art",
+  "Waiting for on-chain confirmation",
+  "Transaction confirmed",
+  "Certificate ready"
+];
 
-  // ── DOM refs ───────────────────────────────────────────────────────────────
-  var micBtn       = document.getElementById('micBtn');
-  var micStatus    = document.getElementById('micStatus');
-  var ph           = document.getElementById('ph');
-  var tt           = document.getElementById('tt');
-  var genBtn       = document.getElementById('genBtn');
-  var clearBtn     = document.getElementById('clearBtn');
-  var errorBox     = document.getElementById('errorBox');
-  var emptyState   = document.getElementById('emptyState');
-  var loadingState = document.getElementById('loadingState');
-  var loadingText  = document.getElementById('loadingText');
-  var articleOut   = document.getElementById('articleOutput');
-  var rightPanel   = document.getElementById('rightPanel');
+// Step timing: steps 0-3 advance every 3s (fast, during inference ~15s)
+// Step 4 stays until we're close to done (polling phase)
+// Steps 5-6 advance at the end
+const STEP_DELAYS = [3000, 3000, 3000, 3000, 99999, 1200, 800];
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  var isRecording      = false;
-  var finalTranscript  = '';
-  var recognition      = null;
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let currentResult = null;
+let stepTimer = null;
 
-  // ── Setup recognition ──────────────────────────────────────────────────────
-  function newRecognition() {
-    // Create a FRESH instance each time — avoids all state carry-over bugs
-    if (!SR) return null;
-    var r = new SR();
-    r.continuous      = false;  // ONE utterance at a time — no duplication
-    r.interimResults  = true;
-    r.lang            = 'en-US';
+function startSteps() {
+  let idx = 0;
+  const stepEl = document.getElementById('loadingStep');
+  stepEl.textContent = STEPS[0];
 
-    r.onresult = function(e) {
-      var newFinal = '';
-      var interim  = '';
-      // Start from e.resultIndex to avoid re-processing already-seen results
-      for (var i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          newFinal += e.results[i][0].transcript;
-        } else {
-          interim  += e.results[i][0].transcript;
-        }
-      }
-      // Append only confirmed new words
-      if (newFinal) finalTranscript += (finalTranscript ? ' ' : '') + newFinal.trim();
-
-      var display = finalTranscript + (interim ? ' ' + interim : '');
-      display = display.trim();
-      if (display) {
-        ph.style.display  = 'none';
-        tt.style.display  = 'inline';
-        tt.textContent    = display;
-        genBtn.disabled   = false;
-      }
-    };
-
-    r.onerror = function(e) {
-      if (e.error === 'no-speech') {
-        // Silently restart — no speech yet is fine
-        if (isRecording) restartListening();
-        return;
-      }
-      if (e.error === 'aborted') return; // user stopped, ignore
-      showError('Mic error: ' + e.error + '. Make sure microphone access is allowed.');
-      setRecordingUI(false);
-      isRecording = false;
-    };
-
-    r.onend = function() {
-      // When one utterance ends, restart if still recording
-      if (isRecording) restartListening();
-    };
-
-    return r;
-  }
-
-  function restartListening() {
-    // Small delay prevents "already started" race condition
-    setTimeout(function() {
-      if (!isRecording) return;
-      recognition = newRecognition();
-      if (recognition) {
-        try { recognition.start(); } catch(e) {}
-      }
-    }, 100);
-  }
-
-  // ── Mic button ─────────────────────────────────────────────────────────────
-  micBtn.addEventListener('click', function() {
-    if (!SR) {
-      showError('Speech recognition not supported. Please use Google Chrome on desktop.');
-      return;
-    }
-    if (isRecording) {
-      stopMic();
-    } else {
-      startMic();
-    }
-  });
-
-  function startMic() {
-    // Always start fresh — clear any previous text
-    finalTranscript   = '';
-    tt.textContent    = '';
-    tt.style.display  = 'none';
-    ph.style.display  = 'inline';
-    genBtn.disabled   = true;
-    hideError();
-
-    isRecording  = true;
-    recognition  = newRecognition();
-    if (recognition) {
-      try { recognition.start(); } catch(e) {}
-    }
-    setRecordingUI(true);
-  }
-
-  function stopMic() {
-    isRecording = false;
-    if (recognition) {
-      try { recognition.stop(); } catch(e) {}
-      recognition = null;
-    }
-    setRecordingUI(false);
-
-    var displayed = tt.textContent.trim();
-    if (displayed) {
-      finalTranscript = displayed;
-      genBtn.disabled = false;
-    }
-  }
-
-  function setRecordingUI(on) {
-    if (on) {
-      micBtn.classList.add('recording');
-      micStatus.textContent = 'Listening... click to stop';
-      micStatus.classList.add('on');
-    } else {
-      micBtn.classList.remove('recording');
-      micStatus.textContent = 'Click to speak';
-      micStatus.classList.remove('on');
-    }
-  }
-
-  // ── Generate ───────────────────────────────────────────────────────────────
-  genBtn.addEventListener('click', generate);
-
-  async function generate() {
-    var text = (finalTranscript || tt.textContent || '').trim();
-    if (!text) { showError('Please say something first.'); return; }
-    if (isRecording) stopMic();
-
-    hideError();
-    showLoading('Connecting to OpenGradient...');
-
-    var timers = [
-      setTimeout(function(){ setLoadingText('Approving OPG tokens...'); },        2000),
-      setTimeout(function(){ setLoadingText('Sending to TEE enclave...'); },      4000),
-      setTimeout(function(){ setLoadingText('LLM writing your article...'); },    7000),
-      setTimeout(function(){ setLoadingText('Settling on-chain via x402...'); }, 12000)
-    ];
-
-    try {
-      var res  = await fetch('/generate', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ transcript: text })
-      });
-      var data = await res.json();
-      timers.forEach(clearTimeout);
-
-      if (!res.ok) throw new Error(data.detail || 'Server error ' + res.status);
-      showArticle(data);
-
-    } catch(err) {
-      timers.forEach(clearTimeout);
-      hideLoading();
-      showError('Error: ' + err.message);
-    }
-  }
-
-  // ── Render article ─────────────────────────────────────────────────────────
-  function showArticle(data) {
-    hideLoading();
-    emptyState.style.display = 'none';
-
-    var raw = (data.article || '').trim();
-    if (!raw) {
-      showError('Empty response — check OPG balance and private key on OpenGradient dashboard.');
-      return;
-    }
-
-    var title = 'Your Article';
-    var body  = raw;
-    var tm    = raw.match(/TITLE:\s*([^\n]+)/i);
-    if (tm) {
-      title = tm[1].trim();
-      body  = raw.replace(/TITLE:\s*[^\n]+\n?/i, '').trim();
-    } else {
-      var lines = raw.split('\n').filter(function(l){ return l.trim(); });
-      if (lines.length > 1) {
-        title = lines[0].replace(/^[#*\- ]+/, '').trim();
-        body  = lines.slice(1).join('\n').trim();
+  function advance() {
+    if (idx < STEPS.length - 1) {
+      idx++;
+      stepEl.textContent = STEPS[idx];
+      if (idx < STEPS.length - 1) {
+        stepTimer = setTimeout(advance, STEP_DELAYS[idx]);
       }
     }
+  }
+  stepTimer = setTimeout(advance, STEP_DELAYS[0]);
+}
 
-    document.getElementById('artTitle').textContent = title;
+function finishSteps(callback) {
+  // Jump to step 5 "Transaction confirmed" then "Certificate ready"
+  clearTimeout(stepTimer);
+  const stepEl = document.getElementById('loadingStep');
+  stepEl.textContent = STEPS[5];
+  setTimeout(() => {
+    stepEl.textContent = STEPS[6];
+    setTimeout(callback, 600);
+  }, 1200);
+}
 
-    var paras = body.split(/\n\s*\n/).map(function(p){ return p.trim(); }).filter(Boolean);
-    document.getElementById('artBody').innerHTML = paras.length
-      ? paras.map(function(p){ return '<p>' + p.replace(/\n/g, ' ') + '</p>'; }).join('')
-      : '<p>' + body + '</p>';
+async function submitIdea() {
+  const idea = document.getElementById('ideaText').value.trim();
+  const author = document.getElementById('authorName').value.trim();
+  const errBox = document.getElementById('errorBox');
 
-    document.getElementById('ts').textContent         = new Date().toLocaleString();
-    document.getElementById('txHash').textContent     = data.tx_hash || 'pending';
-    document.getElementById('inferMode').textContent  = data.inference_mode || 'TEE';
-    document.getElementById('settleMode').textContent = data.settlement_mode || 'INDIVIDUAL_FULL';
-    document.getElementById('modelUsed').textContent  = data.model || '—';
+  errBox.classList.remove('active');
 
-    articleOut.classList.add('show');
-    rightPanel.scrollTop = 0;
+  if (!idea || idea.length < 30) {
+    errBox.textContent = 'Please describe your idea in at least 30 characters.';
+    errBox.classList.add('active');
+    return;
+  }
+  if (!author) {
+    errBox.textContent = 'Please enter your name or alias.';
+    errBox.classList.add('active');
+    return;
   }
 
-  // ── Copy buttons ───────────────────────────────────────────────────────────
-  document.getElementById('copyArticleBtn').addEventListener('click', function() {
-    var t = document.getElementById('artTitle').textContent;
-    var b = document.getElementById('artBody').innerText;
-    navigator.clipboard.writeText(t + '\n\n' + b).then(function() {
-      var btn = document.getElementById('copyArticleBtn');
-      btn.textContent = 'Copied!';
-      setTimeout(function(){ btn.textContent = 'Copy Article'; }, 2000);
+  document.getElementById('formSection').style.display = 'none';
+  document.getElementById('loadingSection').classList.add('active');
+  document.getElementById('certSection').classList.remove('active');
+
+  startSteps();
+
+  try {
+    const res = await fetch('/api/certify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idea, author })
     });
-  });
 
-  document.getElementById('copyHashBtn').addEventListener('click', function() {
-    var h = document.getElementById('txHash').textContent;
-    navigator.clipboard.writeText(h).then(function() {
-      var btn = document.getElementById('copyHashBtn');
-      btn.textContent = 'Copied!';
-      setTimeout(function(){ btn.textContent = 'Copy Tx Hash'; }, 2000);
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Something went wrong. Please try again.');
+    }
+
+    const data = await res.json();
+    currentResult = data;
+
+    // API returned — animate final steps then render
+    finishSteps(() => {
+      renderCertificate(data);
     });
+
+  } catch (err) {
+    clearTimeout(stepTimer);
+    document.getElementById('loadingSection').classList.remove('active');
+    document.getElementById('formSection').style.display = 'block';
+    errBox.textContent = err.message;
+    errBox.classList.add('active');
+  }
+}
+
+function renderCertificate(data) {
+  document.getElementById('loadingSection').classList.remove('active');
+
+  document.getElementById('certTitle').textContent = data.title;
+  document.getElementById('certBy').textContent = 'By ' + data.author + ' · ' + data.timestamp;
+  document.getElementById('certScore').textContent = 'Originality ' + data.scores.overall + ' / 100';
+  document.getElementById('certIdeaText').textContent = data.idea;
+  document.getElementById('analysisText').textContent = data.analysis;
+  document.getElementById('wmDate').textContent = data.timestamp;
+
+  // Basescan button — only link if we have a real tx
+  // const basescanBtn = document.getElementById('basescanBtn');
+  // if (data.explorer_url) {
+  //   basescanBtn.href = data.explorer_url;
+  //   basescanBtn.style.opacity = '1';
+  //   basescanBtn.style.pointerEvents = 'auto';
+  // } else {
+  //   basescanBtn.style.opacity = '0.35';
+  //   basescanBtn.style.pointerEvents = 'none';
+  //   basescanBtn.title = 'Transaction not yet indexed';
+  // }
+
+  setTimeout(() => {
+    const s = data.scores;
+    document.getElementById('scoreNum').textContent = s.overall;
+    const offset = 201 - (s.overall / 100) * 201;
+    document.getElementById('scoreCircle').style.strokeDashoffset = offset;
+    setBar('bar1', 'bv1', s.novelty);
+    setBar('bar2', 'bv2', s.market_gap);
+    setBar('bar3', 'bv3', s.technical);
+    setBar('bar4', 'bv4', s.prior_art_risk, true);
+  }, 100);
+
+  const list = document.getElementById('similarList');
+  list.innerHTML = '';
+  (data.similar || []).forEach(item => {
+    const dot = item.risk === 'medium' ? 'dot-warn' : 'dot-ok';
+    list.innerHTML += `<div class="similar-item">
+      <div class="sim-dot ${dot}"></div>
+      <div>
+        <div class="sim-title">${item.name}</div>
+        <div class="sim-why">${item.difference}</div>
+      </div>
+    </div>`;
   });
 
-  // ── Clear ──────────────────────────────────────────────────────────────────
-  clearBtn.addEventListener('click', function() {
-    if (isRecording) stopMic();
-    finalTranscript      = '';
-    tt.textContent       = '';
-    tt.style.display     = 'none';
-    ph.style.display     = 'inline';
-    genBtn.disabled      = true;
-    articleOut.classList.remove('show');
-    emptyState.style.display = 'flex';
-    hideError();
-    hideLoading();
-  });
+  document.getElementById('certSection').classList.add('active');
+}
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  function showLoading(msg) {
-    emptyState.style.display = 'none';
-    articleOut.classList.remove('show');
-    loadingState.classList.add('show');
-    loadingText.textContent  = msg;
-    genBtn.disabled          = true;
+function setBar(barId, valId, val, invert) {
+  document.getElementById(barId).style.width = val + '%';
+  document.getElementById(valId).textContent = val;
+  if (invert && val > 60) {
+    document.getElementById(valId).style.color = '#ff6b6b';
+    document.getElementById(barId).style.background = '#ff6b6b';
   }
-  function hideLoading() {
-    loadingState.classList.remove('show');
-    genBtn.disabled = false;
-  }
-  function setLoadingText(msg) { loadingText.textContent = msg; }
-  function showError(msg)      { errorBox.textContent = msg; errorBox.classList.add('show'); }
-  function hideError()         { errorBox.classList.remove('show'); }
+}
 
-})();
+async function downloadPNG() {
+  const btn = document.getElementById('downloadBtn');
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Generating...`;
+
+  try {
+    const card = document.getElementById('certCard');
+    const canvas = await html2canvas(card, {
+      backgroundColor: '#162f3b',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: -window.scrollY
+    });
+    const link = document.createElement('a');
+    const slug = (currentResult?.title || 'certificate').replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40);
+    link.download = `proof-${slug}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch (e) {
+    alert('Could not generate PNG. Please try again.');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = origHTML;
+}
+
+function resetForm() {
+  document.getElementById('certSection').classList.remove('active');
+  document.getElementById('formSection').style.display = 'block';
+  document.getElementById('ideaText').value = '';
+  document.getElementById('authorName').value = '';
+  document.getElementById('errorBox').classList.remove('active');
+  currentResult = null;
+}
 </script>
 </body>
 </html>
